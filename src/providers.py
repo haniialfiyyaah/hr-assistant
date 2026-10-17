@@ -26,10 +26,20 @@ class OpenAIProvider:
 
 
 class DeterministicProvider:
-    """TODO(M2): A network-free fake for tests; never production default."""
+    """Network-free fake for tests; never the production default.
+
+    Embeddings are implemented here so hybrid retrieval tests can run offline.
+    respond() is completed in the agent step.
+    """
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError
+        vectors: list[list[float]] = []
+        for text in texts:
+            vec = [0.0] * 8
+            for index, byte in enumerate(text.encode("utf-8")):
+                vec[index % 8] += (byte % 31) / 31.0
+            vectors.append(vec)
+        return vectors
 
     def respond(self, **kwargs: Any) -> ModelTurn:
         raise NotImplementedError
