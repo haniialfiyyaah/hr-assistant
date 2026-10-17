@@ -2,6 +2,8 @@
 
 Docker-only stack: API http://localhost:8000 · UI http://localhost:8501
 
+Full question list (English + Indonesian): [demo-questions.md](demo-questions.md).
+
 1. **Problem and user** (30s) — Employees need grounded HR policy answers and a safe way to propose leave without the system approving it.
 2. **Architecture and trust boundary** (45s) — Bearer identity on the server; tools cannot take another employee id; Redis may degrade; Postgres holds balances, requests, and policy chunks.
 3. **Policy Q&A with citation** (60s) — Persona Alya: “How many annual leave days do permanent employees get?” Expect citation `[HR-LEAVE-001]` and a trace.
