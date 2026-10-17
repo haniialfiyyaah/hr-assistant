@@ -1,0 +1,47 @@
+# Render Blueprint: Neon Postgres externally; Redis skipped (cache degrades).
+# Dashboard → New → Blueprint → select this repo. Set sync:false secrets when prompted.
+# Docs: docs/deploy.md
+
+services:
+  - type: web
+    name: hr-assistant-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Shell so $PORT expands (Render injects PORT; default locally is 8000).
+    dockerCommand: sh -c "uvicorn src.api:create_app --factory --host 0.0.0.0 --port ${PORT:-8000}"
+    healthCheckPath: /healthz
+    envVars:
+      - key: MODEL_MODE
+        value: live
+      - key: POLICY_INDEX_VERSION
+        value: policies-2026-01
+      - key: EMBEDDING_DIMENSIONS
+        value: "1536"
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AGENT_MODEL
+        sync: false
+      - key: EMBEDDING_MODEL
+        sync: false
+      # Intentionally omit REDIS_URL — ResilientCache degrades to miss.
+
+  - type: web
+    name: hr-assistant-ui
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -c "streamlit run app.py --server.address 0.0.0.0 --server.port ${PORT:-8501} --server.headless true"
+    envVars:
+      # Public HTTPS URL of the API service (Render built-in).
+      - key: API_URL
+        fromService:
+          name: hr-assistant-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

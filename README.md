@@ -65,9 +65,16 @@ Build does not require an API key. Runtime reads credentials from `.env`. The im
 
 Switching persona in the UI clears the previous chat. Identity is enforced on the server.
 
+## Deploy (Neon + Render)
+
+Production: **Neon** (Postgres/pgvector) + **Render Free** (API + Streamlit from this repo). Redis is optional and skipped on first deploy.
+
+See [Deploy guide](docs/deploy.md) and [`render.yaml`](render.yaml) (Blueprint → git-push-to-deploy).
+
 ## Docs
 
 - [Project guide — flows and details](docs/project-guide.md) (start here to learn the system)
+- [Deploy — Neon + Render](docs/deploy.md)
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
 - [Demo script](docs/demo.md)
