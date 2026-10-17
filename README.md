@@ -69,6 +69,7 @@ Switching persona in the UI clears the previous chat. Identity is enforced on th
 
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
+- [Demo script](docs/demo.md)
 
 ## Hard gates
 

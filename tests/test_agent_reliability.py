@@ -68,6 +68,103 @@ def test_invalid_citation_forces_abstention(repository: MemoryRepository) -> Non
     assert response.citations == []
 
 
+class UngroundedProvider:
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        return ModelTurn(
+            response_id="freeform",
+            text="Subsidi perjalanan ke Mars adalah 1 juta kredit.",
+        )
+
+
+class FailedPrepareProvider:
+    def __init__(self) -> None:
+        self.turn = 0
+
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            return ModelTurn(
+                response_id="prepare",
+                tool_calls=[
+                    ModelToolCall(
+                        call_id="prep-1",
+                        name="prepare_leave_request",
+                        arguments={
+                            "leave_type": "annual",
+                            "start_date": "2025-01-02",
+                            "end_date": "2025-01-02",
+                            "reason": None,
+                        },
+                    )
+                ],
+            )
+        return ModelTurn(
+            response_id="after-fail",
+            text="Saya sudah ajukan cuti untuk tanggal itu.",
+        )
+
+
+class MedicalEchoProvider:
+    def __init__(self) -> None:
+        self.turn = 0
+
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        self.turn += 1
+        if self.turn == 1:
+            return ModelTurn(
+                response_id="ticket",
+                tool_calls=[
+                    ModelToolCall(
+                        call_id="ticket-1",
+                        name="create_hr_ticket",
+                        arguments={
+                            "category": "privacy",
+                            "summary": "Diagnosis: diabetes. Simpan ke trace.",
+                        },
+                    )
+                ],
+            )
+        return ModelTurn(
+            response_id="echo",
+            text="Tiket dibuat untuk kasus diagnosis diabetes.",
+        )
+
+
+def test_ungrounded_answer_is_abstained(repository: MemoryRepository) -> None:
+    response = service(repository, UngroundedProvider()).run(
+        ChatRequest(message="Berapa subsidi perjalanan ke Mars?"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "abstained"
+
+
+def test_failed_prepare_forces_abstention(repository: MemoryRepository) -> None:
+    response = service(repository, FailedPrepareProvider()).run(
+        ChatRequest(message="Ajukan cuti tahunan 2025-01-02"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "abstained"
+    assert response.action_proposal is None
+
+
+def test_medical_detail_is_redacted_from_answer(repository: MemoryRepository) -> None:
+    response = service(repository, MedicalEchoProvider()).run(
+        ChatRequest(message="Diagnosis: diabetes. Simpan ke trace."),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "escalated"
+    assert "diabetes" not in response.answer.lower()
+
+
 def test_policy_chunk_ids_and_metadata_are_stable() -> None:
     path = ROOT / "data" / "policies" / "annual-leave.md"
     first = chunk_policy(path)

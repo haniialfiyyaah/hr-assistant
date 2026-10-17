@@ -155,9 +155,11 @@ class ToolExecutor:
             return proposal.model_dump(mode="json"), proposal
 
         if name == "create_hr_ticket":
+            from .security import redact
+
             args = TicketArgs.model_validate(arguments)
             ticket_id = self.repository.create_ticket(
-                auth.employee_id, args.category, args.summary
+                auth.employee_id, args.category, redact(args.summary)
             )
             return {"ticket_id": ticket_id, "status": "open"}, None
 

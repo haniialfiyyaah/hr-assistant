@@ -27,7 +27,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       MODEL_MODE: ${MODEL_MODE:-live}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      # Only forward a real base URL; an empty string breaks the OpenAI SDK.
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       AGENT_MODEL: ${AGENT_MODEL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}

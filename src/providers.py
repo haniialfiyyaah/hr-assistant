@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any, Protocol
 
@@ -55,9 +56,14 @@ class OpenAIProvider:
         self.embedding_dimensions = embedding_dimensions
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        # The SDK also reads OPENAI_BASE_URL from the process env. Compose often
+        # injects an empty string from .env, which breaks httpx ("missing protocol").
+        cleaned_base = (base_url or "").strip() or None
+        if not cleaned_base:
+            os.environ.pop("OPENAI_BASE_URL", None)
         kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout_seconds}
-        if base_url:
-            kwargs["base_url"] = base_url
+        if cleaned_base:
+            kwargs["base_url"] = cleaned_base
         self.client = OpenAI(**kwargs)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
