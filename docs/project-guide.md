@@ -2,7 +2,7 @@
 
 Learning-oriented overview of **HR Policy and Leave Assistant**: what the product does, how requests move through the system, and which modules own each concern.
 
-Related docs: [architecture](architecture.md) · [risks](risks.md) · [demo script](demo.md)
+Related docs: [architecture](architecture.md) · [risks](risks.md) · [demo script](demo.md) · [demo questions](demo-questions.md)
 
 ---
 
@@ -13,6 +13,8 @@ Employees ask about HR policy and leave; the API authenticates them; a bounded a
 ---
 
 ## 2. Hard gates (non-negotiable)
+
+A **hard gate** is a rule that **must never fail**. In live evaluation, hard-gate cases must pass **100%**; any failure makes the release decision **NO-GO**, even if overall pass rate is still high. Soft quality cases can miss some (overall pass still needs ≥ 80%). See also [demo-questions.md](demo-questions.md).
 
 | Gate | Meaning |
 | --- | --- |
