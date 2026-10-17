@@ -74,6 +74,9 @@ class MemoryRepository:
     def health(self) -> bool:
         return True
 
+    def index_ready(self) -> bool:
+        return len(self.chunks) > 0
+
     def authenticate(self, token: str) -> AuthContext | None:
         return self._token_to_auth.get(token_hash(token))
 
@@ -227,9 +230,397 @@ class MemoryRepository:
         }
 
 
-class PostgresRepository:
-    def __init__(self, database_url: str, embedding_dimensions: int) -> None:
-        # TODO(M2): Create a psycopg connection pool. Do not interpolate user input into SQL.
-        raise NotImplementedError
+def _vector_literal(embedding: list[float]) -> str:
+    return "[" + ",".join(f"{float(value):.8f}" for value in embedding) + "]"
 
-    # TODO(M2): Implement transaction-safe persistence and pgvector/full-text queries.
+
+class PostgresRepository:
+    """PostgreSQL + pgvector persistence for runtime use."""
+
+    def __init__(self, database_url: str, embedding_dimensions: int) -> None:
+        from psycopg_pool import ConnectionPool
+
+        self.database_url = database_url
+        self.embedding_dimensions = embedding_dimensions
+        self.pool = ConnectionPool(
+            conninfo=database_url,
+            min_size=1,
+            max_size=8,
+            kwargs={"autocommit": True},
+            open=True,
+        )
+
+    def close(self) -> None:
+        self.pool.close()
+
+    def health(self) -> bool:
+        try:
+            with self.pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            return True
+        except Exception:
+            return False
+
+    def index_ready(self) -> bool:
+        try:
+            with self.pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM policy_chunks")
+                    row = cur.fetchone()
+                    return bool(row and int(row[0]) > 0)
+        except Exception:
+            return False
+
+    def authenticate(self, token: str) -> AuthContext | None:
+        digest = token_hash(token)
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT employee_id, display_name, role
+                    FROM employees
+                    WHERE token_hash = %s
+                    """,
+                    (digest,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return AuthContext(employee_id=row[0], display_name=row[1], role=row[2])
+
+    def lexical_search(self, query: str, limit: int) -> list[PolicyChunk]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT chunk_id, document_id, title, section, version, effective_date,
+                           content, ts_rank(tsv, plainto_tsquery('simple', %s)) AS score
+                    FROM policy_chunks
+                    WHERE tsv @@ plainto_tsquery('simple', %s)
+                    ORDER BY score DESC
+                    LIMIT %s
+                    """,
+                    (query, query, limit),
+                )
+                rows = cur.fetchall()
+        return [
+            PolicyChunk(
+                chunk_id=row[0],
+                document_id=row[1],
+                title=row[2],
+                section=row[3],
+                version=row[4],
+                effective_date=row[5],
+                content=row[6],
+                score=float(row[7] or 0.0),
+            )
+            for row in rows
+        ]
+
+    def vector_search(self, embedding: list[float], limit: int) -> list[PolicyChunk]:
+        if len(embedding) != self.embedding_dimensions:
+            raise ValueError(
+                f"Embedding dimension {len(embedding)} does not match "
+                f"configured {self.embedding_dimensions}"
+            )
+        literal = _vector_literal(embedding)
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT chunk_id, document_id, title, section, version, effective_date,
+                           content, 1.0 / (1.0 + (embedding <=> %s::vector)) AS score
+                    FROM policy_chunks
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    (literal, literal, limit),
+                )
+                rows = cur.fetchall()
+        return [
+            PolicyChunk(
+                chunk_id=row[0],
+                document_id=row[1],
+                title=row[2],
+                section=row[3],
+                version=row[4],
+                effective_date=row[5],
+                content=row[6],
+                score=float(row[7] or 0.0),
+            )
+            for row in rows
+        ]
+
+    def get_balances(self, employee_id: str) -> list[LeaveBalance]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT leave_type, available_days, as_of_date
+                    FROM leave_balances
+                    WHERE employee_id = %s
+                    ORDER BY leave_type
+                    """,
+                    (employee_id,),
+                )
+                rows = cur.fetchall()
+        return [
+            LeaveBalance(leave_type=row[0], available_days=row[1], as_of_date=row[2])
+            for row in rows
+        ]
+
+    def has_overlap(self, employee_id: str, start: date, end: date) -> bool:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM leave_requests
+                    WHERE employee_id = %s
+                      AND status <> 'cancelled'
+                      AND start_date <= %s
+                      AND end_date >= %s
+                    LIMIT 1
+                    """,
+                    (employee_id, end, start),
+                )
+                return cur.fetchone() is not None
+
+    def save_proposal(self, employee_id: str, proposal: ActionProposal) -> None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO action_proposals (
+                        proposal_id, employee_id, leave_type, start_date, end_date,
+                        business_days, reason, validation_summary, expires_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT (proposal_id) DO UPDATE SET
+                        employee_id = EXCLUDED.employee_id,
+                        leave_type = EXCLUDED.leave_type,
+                        start_date = EXCLUDED.start_date,
+                        end_date = EXCLUDED.end_date,
+                        business_days = EXCLUDED.business_days,
+                        reason = EXCLUDED.reason,
+                        validation_summary = EXCLUDED.validation_summary,
+                        expires_at = EXCLUDED.expires_at,
+                        idempotency_key = NULL,
+                        request_id = NULL,
+                        audit_reference = NULL
+                    """,
+                    (
+                        proposal.proposal_id,
+                        employee_id,
+                        proposal.leave_type,
+                        proposal.start_date,
+                        proposal.end_date,
+                        proposal.business_days,
+                        proposal.reason,
+                        json.dumps(proposal.validation_summary),
+                        proposal.expires_at,
+                    ),
+                )
+
+    def get_proposal(self, proposal_id: str) -> tuple[str, ActionProposal] | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT employee_id, proposal_id, leave_type, start_date, end_date,
+                           business_days, reason, validation_summary, expires_at
+                    FROM action_proposals
+                    WHERE proposal_id = %s
+                    """,
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        proposal = ActionProposal(
+            proposal_id=row[1],
+            leave_type=row[2],
+            start_date=row[3],
+            end_date=row[4],
+            business_days=row[5],
+            reason=row[6],
+            validation_summary=list(row[7] or []),
+            expires_at=row[8],
+        )
+        return row[0], proposal
+
+    def confirm_proposal(
+        self, employee_id: str, proposal_id: str, idempotency_key: str
+    ) -> ActionResult:
+        with self.pool.connection() as conn:
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT employee_id, leave_type, start_date, end_date, business_days,
+                               reason, expires_at, idempotency_key, request_id, audit_reference
+                        FROM action_proposals
+                        WHERE proposal_id = %s
+                        FOR UPDATE
+                        """,
+                        (proposal_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None or row[0] != employee_id:
+                        raise KeyError(proposal_id)
+
+                    expires_at = row[6]
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at < datetime.now(timezone.utc):
+                        raise ConflictError("proposal expired")
+
+                    existing_key, existing_request, existing_audit = row[7], row[8], row[9]
+                    if existing_request is not None:
+                        if existing_key == idempotency_key:
+                            conn.commit()
+                            return ActionResult(
+                                request_id=existing_request,
+                                status="pending_manager_review",
+                                idempotent_replay=True,
+                                audit_reference=existing_audit,
+                            )
+                        raise ConflictError("idempotency key conflict")
+
+                    request_id = f"LR-{uuid.uuid4().hex[:12].upper()}"
+                    audit_reference = f"AUD-{uuid.uuid4().hex[:10].upper()}"
+                    created_at = datetime.now(timezone.utc)
+                    cur.execute(
+                        """
+                        INSERT INTO leave_requests (
+                            request_id, employee_id, leave_type, start_date, end_date,
+                            business_days, status, created_at, reason
+                        ) VALUES (%s, %s, %s, %s, %s, %s, 'pending_manager_review', %s, %s)
+                        """,
+                        (
+                            request_id,
+                            employee_id,
+                            row[1],
+                            row[2],
+                            row[3],
+                            row[4],
+                            created_at,
+                            row[5],
+                        ),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE action_proposals
+                        SET idempotency_key = %s,
+                            request_id = %s,
+                            audit_reference = %s
+                        WHERE proposal_id = %s
+                        """,
+                        (idempotency_key, request_id, audit_reference, proposal_id),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.autocommit = True
+
+        return ActionResult(
+            request_id=request_id,
+            status="pending_manager_review",
+            idempotent_replay=False,
+            audit_reference=audit_reference,
+        )
+
+    def list_leave_requests(self, employee_id: str) -> list[LeaveRequestView]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT request_id, leave_type, start_date, end_date,
+                           business_days, status, created_at
+                    FROM leave_requests
+                    WHERE employee_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (employee_id,),
+                )
+                rows = cur.fetchall()
+        return [
+            LeaveRequestView(
+                request_id=row[0],
+                leave_type=row[1],
+                start_date=row[2],
+                end_date=row[3],
+                business_days=row[4],
+                status=row[5],
+                created_at=row[6],
+            )
+            for row in rows
+        ]
+
+    def create_ticket(self, employee_id: str, category: str, summary: str) -> str:
+        ticket_id = f"TKT-{uuid.uuid4().hex[:10].upper()}"
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO hr_tickets (ticket_id, employee_id, category, summary)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (ticket_id, employee_id, category, summary),
+                )
+        return ticket_id
+
+    def save_trace(self, trace: dict[str, Any]) -> None:
+        trace_id = trace.get("trace_id")
+        employee_id = trace.get("employee_id")
+        if not trace_id or not employee_id:
+            raise ValueError("trace_id and employee_id are required")
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO traces (trace_id, employee_id, payload)
+                    VALUES (%s, %s, %s::jsonb)
+                    ON CONFLICT (trace_id) DO UPDATE
+                    SET payload = EXCLUDED.payload, employee_id = EXCLUDED.employee_id
+                    """,
+                    (str(trace_id), str(employee_id), json.dumps(trace, default=str)),
+                )
+
+    def get_trace(self, trace_id: str) -> dict[str, Any] | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT payload FROM traces WHERE trace_id = %s",
+                    (trace_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        payload = row[0]
+        return dict(payload) if isinstance(payload, dict) else json.loads(payload)
+
+    def monitoring_summary(self) -> dict[str, Any]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT payload FROM traces")
+                payloads = [row[0] for row in cur.fetchall()]
+        traces = [
+            dict(item) if isinstance(item, dict) else json.loads(item) for item in payloads
+        ]
+        run_count = len(traces)
+        error_count = sum(1 for item in traces if item.get("error"))
+        latencies = [int(item.get("latency_ms") or 0) for item in traces]
+        p95 = sorted(latencies)[int(0.95 * (len(latencies) - 1))] if latencies else 0
+        tool_calls = sum(len(item.get("tool_calls") or []) for item in traces)
+        return {
+            "run_count": run_count,
+            "error_rate": (error_count / run_count) if run_count else 0.0,
+            "p95_latency_ms": p95,
+            "tool_calls": tool_calls,
+        }
+

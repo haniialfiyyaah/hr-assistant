@@ -113,10 +113,11 @@ def create_app(
         db_ok = repository.health()
         cache_ok = cache.health()
         model_ok = settings.model_mode == "fake" or settings.live_model_ready
-        index_ok = True
-        chunks = getattr(repository, "chunks", None)
-        if isinstance(chunks, list):
-            index_ok = len(chunks) > 0
+        if hasattr(repository, "index_ready"):
+            index_ok = bool(repository.index_ready())
+        else:
+            chunks = getattr(repository, "chunks", None)
+            index_ok = len(chunks) > 0 if isinstance(chunks, list) else True
         ready = db_ok and model_ok and index_ok
         return {
             "status": "ready" if ready else "not_ready",

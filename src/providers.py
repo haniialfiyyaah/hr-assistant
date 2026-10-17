@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from typing import Any, Protocol
 
 from .contracts import ModelToolCall, ModelTurn
+
+logger = logging.getLogger(__name__)
 
 
 class ModelProvider(Protocol):
@@ -20,21 +24,88 @@ class ModelProvider(Protocol):
 
 
 class OpenAIProvider:
-    """Live Responses API provider — implemented in the Docker/live step."""
+    """Live OpenAI embeddings + Responses API function calling.
 
-    def __init__(self, **kwargs: Any) -> None:
-        raise NotImplementedError
+    respond() is completed for the live/Docker step; embed() is available for seeding now.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        agent_model: str,
+        embedding_model: str,
+        embedding_dimensions: int,
+        base_url: str | None = None,
+        timeout_seconds: float = 30.0,
+        max_retries: int = 2,
+    ) -> None:
+        from openai import OpenAI
+
+        self.agent_model = agent_model
+        self.embedding_model = embedding_model
+        self.embedding_dimensions = embedding_dimensions
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout_seconds}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = OpenAI(**kwargs)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                create_kwargs: dict[str, Any] = {
+                    "model": self.embedding_model,
+                    "input": texts,
+                }
+                # text-embedding-3-* supports explicit dimensions.
+                if self.embedding_dimensions:
+                    create_kwargs["dimensions"] = self.embedding_dimensions
+                response = self.client.embeddings.create(**create_kwargs)
+                vectors = [list(item.embedding) for item in response.data]
+                for vector in vectors:
+                    if len(vector) != self.embedding_dimensions:
+                        raise RuntimeError(
+                            f"Embedding width {len(vector)} != {self.embedding_dimensions}"
+                        )
+                return vectors
+            except Exception as exc:  # noqa: BLE001 - bounded retry for transient failures
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                time.sleep(0.5 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
+
+    def respond(
+        self,
+        *,
+        input_data: str | list[Any],
+        instructions: str,
+        tools: list[dict[str, Any]],
+        safety_identifier: str,
+        max_output_tokens: int,
+    ) -> ModelTurn:
+        # Full Responses API loop wiring lands with the live/Docker step.
+        raise NotImplementedError("OpenAIProvider.respond is implemented in Step 7")
 
 
 class DeterministicProvider:
     """Network-free fake for tests; never the production default."""
 
+    def __init__(self, dimensions: int = 8) -> None:
+        self.dimensions = dimensions
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for text in texts:
-            vec = [0.0] * 8
+            vec = [0.0] * self.dimensions
             for index, byte in enumerate(text.encode("utf-8")):
-                vec[index % 8] += (byte % 31) / 31.0
+                vec[index % self.dimensions] += (byte % 31) / 31.0
             vectors.append(vec)
         return vectors
 
