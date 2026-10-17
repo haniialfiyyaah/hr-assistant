@@ -122,6 +122,75 @@ flowchart LR
   PG --> Ready["/readyz: database + cache + model + index"]
 ```
 
+### 4.5 When OpenAI is called
+
+OpenAI is used in **three places**. Confirm leave, list requests, and monitoring do **not** call OpenAI — those are plain API/DB.
+
+| When | OpenAI API | Why |
+| --- | --- | --- |
+| Seed | Embeddings | Index policy chunks |
+| Chat | Responses (`store=False`) | Agent decides tools / writes the answer |
+| Chat + RAG cache miss | Embeddings | Embed the question for vector search |
+
+```mermaid
+flowchart TB
+  subgraph seed ["Seed time — setup_lab"]
+    P[Policy files] --> Chunk[Chunk text]
+    Chunk --> E1["OpenAI Embeddings API<br/>embed each chunk"]
+    E1 --> DB[(Postgres / pgvector)]
+  end
+
+  subgraph chat ["Chat time — POST /api/v1/chat"]
+    U[User message] --> Agent["OpenAI Responses API<br/>agent turn store=False"]
+    Agent -->|tool: search_hr_policy| Cache{Redis hit?}
+    Cache -->|yes| Chunks[Cached chunks]
+    Cache -->|no| E2["OpenAI Embeddings API<br/>embed query"]
+    E2 --> Search[Hybrid search]
+    Search --> Chunks
+    Chunks --> Agent2["OpenAI Responses API<br/>continue with tool results"]
+    Agent -->|other tools / final answer| Out[ChatResponse]
+    Agent2 --> Out
+  end
+
+  DB -.->|vectors for search| Search
+```
+
+```mermaid
+sequenceDiagram
+  participant UI as Streamlit
+  participant API as FastAPI / Agent
+  participant OAI as OpenAI
+  participant PG as Postgres
+  participant Redis as Redis
+
+  Note over UI,Redis: Seed once
+  API->>OAI: embeddings.create policy chunks
+  OAI-->>API: vectors
+  API->>PG: store chunks + embeddings
+
+  Note over UI,Redis: Chat each message
+  UI->>API: POST /chat
+  API->>OAI: responses.create decide tools or answer
+  OAI-->>API: function_call or text
+
+  alt search_hr_policy and cache miss
+    API->>OAI: embeddings.create query
+    OAI-->>API: query vector
+    API->>PG: hybrid retrieve
+  else search_hr_policy and cache hit
+    API->>Redis: get cached results
+  end
+
+  opt more agent turns
+    API->>OAI: responses.create with tool outputs
+    OAI-->>API: final text or more tools
+  end
+
+  API-->>UI: ChatResponse
+```
+
+Chunking happens only at seed. At chat time we retrieve stored chunks; we re-embed only the **query** when RAG runs and the cache misses.
+
 ---
 
 ## 5. Personas
