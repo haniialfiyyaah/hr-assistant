@@ -1,12 +1,12 @@
-# Nusantara Digital — HR Policy and Leave Assistant
+# HR Policy and Leave Assistant
 
-Employee assistant for the fictional company **Nusantara Digital**. It answers HR policy questions with citations, shows the signed-in employee's leave balance, prepares a leave proposal, and creates a leave request with status `pending_manager_review` only after explicit confirmation. A human still approves leave.
+A general employee HR assistant: policy Q&A with citations, leave balance for the signed-in user, leave proposals, and a pending leave request only after explicit confirmation. A human still approves leave.
 
-This repository is the portfolio product checkout (API, agent, retrieval, UI, tests, Docker, synthetic data).
+This repository is a portfolio product (API, agent, retrieval, UI, tests, Docker, synthetic demo data). It is not framed as a course assignment.
 
 ## Status
 
-**Step 1 scaffold complete.** Contracts, synthetic data, acceptance tests, and Compose wiring are in place. Backend stubs (`TODO(M2)`) will be implemented in later steps.
+Scaffold is in place: API contracts, synthetic data, acceptance tests, and Compose wiring. Backend modules are implemented step by step.
 
 ## Quick start (later steps)
 

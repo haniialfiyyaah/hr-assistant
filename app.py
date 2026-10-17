@@ -23,9 +23,9 @@ def request(method: str, path: str, token: str, **kwargs):
     return response.json()
 
 
-st.set_page_config(page_title="Asisten HR Nusantara Digital", page_icon="🧭", layout="wide")
-st.title("Asisten Kebijakan HR dan Cuti")
-st.caption("Data dan token pada aplikasi ini sepenuhnya sintetis untuk kebutuhan pembelajaran.")
+st.set_page_config(page_title="HR Policy and Leave Assistant", page_icon="🧭", layout="wide")
+st.title("HR Policy and Leave Assistant")
+st.caption("Demo data and tokens are synthetic. Identity comes from the signed-in persona token.")
 
 personas = load_personas(Path(__file__).with_name("demo_personas.json"))
 persona = st.sidebar.selectbox("Persona demo", personas, format_func=lambda item: item["label"])
