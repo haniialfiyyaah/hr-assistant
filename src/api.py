@@ -21,8 +21,8 @@ from .contracts import (
     LeaveRequestView,
     ProblemDetail,
 )
-from .providers import DeterministicProvider
-from .repository import ConflictError, MemoryRepository, Repository
+from .providers import DeterministicProvider, OpenAIProvider
+from .repository import ConflictError, MemoryRepository, PostgresRepository, Repository
 from .retrieval import RetrievalService
 from .tools import ToolExecutor
 
@@ -31,13 +31,29 @@ MONITORING_RULES_PATH = ROOT / "data" / "monitoring_rules.json"
 
 
 def build_runtime(settings: Settings) -> dict[str, Any]:
-    """Wire dependencies for local fake mode. Live Postgres wiring comes later."""
-    if settings.model_mode != "fake":
-        raise NotImplementedError("Live Postgres runtime is implemented in a later step.")
+    """Wire repository, cache, provider, retrieval, tools, and agent for the active mode."""
+    if settings.model_mode == "fake":
+        repository: Repository = MemoryRepository()
+        cache: ResilientCache = NullCache()
+        provider: DeterministicProvider | OpenAIProvider = DeterministicProvider()
+    else:
+        if not settings.live_model_ready:
+            raise RuntimeError(
+                "Live mode requires OPENAI_API_KEY, AGENT_MODEL, and EMBEDDING_MODEL."
+            )
+        repository = PostgresRepository(
+            settings.database_url, settings.embedding_dimensions
+        )
+        cache = ResilientCache(settings.redis_url)
+        provider = OpenAIProvider(
+            api_key=settings.openai_api_key or "",
+            agent_model=settings.agent_model,
+            embedding_model=settings.embedding_model,
+            embedding_dimensions=settings.embedding_dimensions,
+            base_url=settings.openai_base_url,
+            timeout_seconds=settings.model_timeout_seconds,
+        )
 
-    repository = MemoryRepository()
-    cache: ResilientCache = NullCache()
-    provider = DeterministicProvider()
     retrieval = RetrievalService(
         repository, provider, cache, settings.retrieval_cache_ttl_seconds
     )

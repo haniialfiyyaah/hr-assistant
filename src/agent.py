@@ -1,6 +1,7 @@
 """Bounded tool-calling agent with citation validation and redacted traces."""
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
@@ -84,19 +85,19 @@ class AgentService:
                 output_tokens += turn.output_tokens
 
                 if turn.tool_calls:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "tool_calls": [
+                    # Prefer provider output items so live Responses API can continue the loop.
+                    if turn.output_items:
+                        messages.extend(list(turn.output_items))
+                    else:
+                        for item in turn.tool_calls:
+                            messages.append(
                                 {
+                                    "type": "function_call",
                                     "call_id": item.call_id,
                                     "name": item.name,
-                                    "arguments": item.arguments,
+                                    "arguments": json.dumps(item.arguments),
                                 }
-                                for item in turn.tool_calls
-                            ],
-                        }
-                    )
+                            )
                     for call in turn.tool_calls:
                         if tool_call_count >= self.settings.max_tool_calls:
                             break
@@ -126,10 +127,9 @@ class AgentService:
                         )
                         messages.append(
                             {
-                                "role": "tool",
+                                "type": "function_call_output",
                                 "call_id": call.call_id,
-                                "name": call.name,
-                                "content": result,
+                                "output": json.dumps(result, default=str),
                             }
                         )
                     continue

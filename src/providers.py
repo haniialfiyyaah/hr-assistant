@@ -23,11 +23,19 @@ class ModelProvider(Protocol):
     ) -> ModelTurn: ...
 
 
-class OpenAIProvider:
-    """Live OpenAI embeddings + Responses API function calling.
+def _is_transient(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    if status in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    return any(token in name for token in ("timeout", "ratelimit", "apiconnection", "internalserver"))
 
-    respond() is completed for the live/Docker step; embed() is available for seeding now.
-    """
+
+class OpenAIProvider:
+    """Live OpenAI embeddings + Responses API function calling."""
 
     def __init__(
         self,
@@ -62,7 +70,6 @@ class OpenAIProvider:
                     "model": self.embedding_model,
                     "input": texts,
                 }
-                # text-embedding-3-* supports explicit dimensions.
                 if self.embedding_dimensions:
                     create_kwargs["dimensions"] = self.embedding_dimensions
                 response = self.client.embeddings.create(**create_kwargs)
@@ -73,9 +80,9 @@ class OpenAIProvider:
                             f"Embedding width {len(vector)} != {self.embedding_dimensions}"
                         )
                 return vectors
-            except Exception as exc:  # noqa: BLE001 - bounded retry for transient failures
+            except Exception as exc:  # noqa: BLE001
                 last_error = exc
-                if attempt >= self.max_retries:
+                if attempt >= self.max_retries or not _is_transient(exc):
                     break
                 time.sleep(0.5 * (attempt + 1))
         assert last_error is not None
@@ -90,8 +97,76 @@ class OpenAIProvider:
         safety_identifier: str,
         max_output_tokens: int,
     ) -> ModelTurn:
-        # Full Responses API loop wiring lands with the live/Docker step.
-        raise NotImplementedError("OpenAIProvider.respond is implemented in Step 7")
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                create_kwargs: dict[str, Any] = {
+                    "model": self.agent_model,
+                    "instructions": instructions,
+                    "input": input_data,
+                    "tools": tools,
+                    "store": False,
+                    "max_output_tokens": max_output_tokens,
+                }
+                try:
+                    response = self.client.responses.create(
+                        **create_kwargs,
+                        safety_identifier=safety_identifier,
+                    )
+                except TypeError:
+                    # Older SDK builds may not accept safety_identifier.
+                    response = self.client.responses.create(**create_kwargs)
+
+                return self._parse_response(response)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= self.max_retries or not _is_transient(exc):
+                    break
+                logger.warning("Transient Responses API failure; retrying (%s)", attempt + 1)
+                time.sleep(0.5 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
+
+    def _parse_response(self, response: Any) -> ModelTurn:
+        tool_calls: list[ModelToolCall] = []
+        text_parts: list[str] = []
+        output_items: list[Any] = []
+
+        for item in getattr(response, "output", None) or []:
+            item_type = getattr(item, "type", None)
+            if item_type == "function_call":
+                raw_args = getattr(item, "arguments", "{}")
+                arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                call_id = str(getattr(item, "call_id", "") or getattr(item, "id", ""))
+                name = str(getattr(item, "name", ""))
+                tool_calls.append(
+                    ModelToolCall(call_id=call_id, name=name, arguments=arguments)
+                )
+                output_items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": raw_args if isinstance(raw_args, str) else json.dumps(arguments),
+                    }
+                )
+            elif item_type == "message":
+                for content in getattr(item, "content", None) or []:
+                    content_type = getattr(content, "type", None)
+                    if content_type in {"output_text", "text"}:
+                        text_parts.append(str(getattr(content, "text", "") or ""))
+
+        usage = getattr(response, "usage", None)
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        return ModelTurn(
+            response_id=str(getattr(response, "id", "response")),
+            text="".join(text_parts).strip(),
+            tool_calls=tool_calls,
+            output_items=output_items,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
 
 class DeterministicProvider:
@@ -124,7 +199,11 @@ class DeterministicProvider:
             else json.dumps(input_data, default=str, ensure_ascii=False)
         )
         lower = blob.lower()
-        has_tool_results = '"role": "tool"' in blob or "'role': 'tool'" in blob
+        has_tool_results = (
+            "function_call_output" in blob
+            or '"role": "tool"' in blob
+            or "'role': 'tool'" in blob
+        )
 
         if has_tool_results:
             if "hr-leave-001" in lower or "12 hari" in lower:
