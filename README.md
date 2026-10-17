@@ -67,6 +67,7 @@ Switching persona in the UI clears the previous chat. Identity is enforced on th
 
 ## Docs
 
+- [Project guide — flows and details](docs/project-guide.md) (start here to learn the system)
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
 - [Demo script](docs/demo.md)
