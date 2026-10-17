@@ -25,5 +25,6 @@ USER appuser
 EXPOSE 8000
 
 # No ENTRYPOINT so Compose / Render can override CMD for Streamlit, seed, and tests.
-CMD ["./scripts/start-api.sh"]
+CMD ["sh", "/app/scripts/start-api.sh"]
+
 

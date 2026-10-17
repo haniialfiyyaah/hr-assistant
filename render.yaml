@@ -9,9 +9,10 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Use scripts so PORT expands (Render's dockerCommand drops sh -c quoting).
-    dockerCommand: ./scripts/start-api.sh
+    # Invoke via sh + absolute path (avoids shebang/CRLF and cwd issues).
+    dockerCommand: sh /app/scripts/start-api.sh
     healthCheckPath: /healthz
+
 
     envVars:
       - key: MODEL_MODE
@@ -38,7 +39,8 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: ./scripts/start-ui.sh
+    dockerCommand: sh /app/scripts/start-ui.sh
+
 
     envVars:
       # Public HTTPS URL of the API service (Render built-in).

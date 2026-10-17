@@ -1,0 +1,2 @@
+# Prevent CRLF shebang breakage in Linux containers (Render).
+*.sh text eol=lf
