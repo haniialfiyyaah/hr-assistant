@@ -13,14 +13,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src ./src
 COPY data ./data
 COPY tests ./tests
+COPY scripts ./scripts
 COPY app.py ui_contract.py demo_personas.json pyproject.toml ./
 COPY .streamlit ./.streamlit
 
-RUN useradd --create-home --uid 10001 appuser \
+RUN chmod +x scripts/start-api.sh scripts/start-ui.sh \
+    && useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
 
-# No ENTRYPOINT so Compose can override CMD for Streamlit, seed, and tests.
-CMD ["uvicorn", "src.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# No ENTRYPOINT so Compose / Render can override CMD for Streamlit, seed, and tests.
+CMD ["./scripts/start-api.sh"]
+

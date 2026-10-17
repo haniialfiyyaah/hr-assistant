@@ -46,7 +46,7 @@ Do **not** use Render’s free Postgres for this project (30-day expiry). Keep N
 5. Do **not** set `REDIS_URL` (leave unset so cache degrades cleanly).
 6. **hr-assistant-ui** gets `API_URL` from the API service’s `RENDER_EXTERNAL_URL` automatically. Confirm it has no trailing slash after the first deploy.
 
-Both services use the existing [`Dockerfile`](../Dockerfile) and override `CMD` so Render’s `$PORT` is honored.
+Both services use the existing [`Dockerfile`](../Dockerfile). Start commands are [`scripts/start-api.sh`](../scripts/start-api.sh) and [`scripts/start-ui.sh`](../scripts/start-ui.sh) so Render’s `$PORT` expands correctly.
 
 ## 3. Seed once
 

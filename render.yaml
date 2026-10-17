@@ -9,9 +9,10 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Shell so $PORT expands (Render injects PORT; default locally is 8000).
-    dockerCommand: sh -c "uvicorn src.api:create_app --factory --host 0.0.0.0 --port ${PORT:-8000}"
+    # Use scripts so PORT expands (Render's dockerCommand drops sh -c quoting).
+    dockerCommand: ./scripts/start-api.sh
     healthCheckPath: /healthz
+
     envVars:
       - key: MODEL_MODE
         value: live
@@ -37,7 +38,8 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: sh -c "streamlit run app.py --server.address 0.0.0.0 --server.port ${PORT:-8501} --server.headless true"
+    dockerCommand: ./scripts/start-ui.sh
+
     envVars:
       # Public HTTPS URL of the API service (Render built-in).
       - key: API_URL
