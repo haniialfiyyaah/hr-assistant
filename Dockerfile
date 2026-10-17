@@ -14,6 +14,7 @@ COPY src ./src
 COPY data ./data
 COPY tests ./tests
 COPY app.py ui_contract.py demo_personas.json pyproject.toml ./
+COPY .streamlit ./.streamlit
 
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
