@@ -18,7 +18,7 @@ def stable_safety_id(employee_id: str) -> str:
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"(?:\+62|62|0)8\d{8,12}\b")
-_TOKEN_RE = re.compile(r"\btoken-[A-Za-z0-9_-]+\b", re.IGNORECASE)
+_TOKEN_RE = re.compile(r"\btoken[-_][A-Za-z0-9_-]+\b", re.IGNORECASE)
 # Common medical detail / diagnosis cues for synthetic demo traces.
 _MEDICAL_RE = re.compile(
     r"\b(?:diabetes|diagnosis|diagnosa|penyakit|medical|medis)\b[:\s]*[A-Za-z0-9_-]*",
