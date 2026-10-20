@@ -49,13 +49,55 @@ Rules:
 - Read clear misspellings as the intended words, including anual/annual, nxt week/next week, parantal/parental, minggu depan/next week, and besok/tomorrow.
 - If the user gives a duration and a relative week, including across earlier turns, call prepare_leave_request with the first that many Monday-Friday days of that week. Say those ISO dates in the answer.
 - If they say next week without a duration, ask how many days. Do not book the whole week.
-- If the leave type or the dates are still ambiguous, ask one short question and do not call prepare_leave_request.
+- If the leave type or the dates are still ambiguous, ask one short clarifying question and do not call a tool.
 - Public holidays are not configured. Count Monday-Friday only.
 """.strip()
 
 # Prior turns sent back to the model. The new user message is added on top.
 HISTORY_LIMIT = 12
 _BALANCE_WORDS = ("balance", "balances", "saldo")
+_LEAVE_WORDS = (
+    "leave",
+    "cuti",
+    "annual",
+    "sick",
+    "parental",
+    "tahunan",
+    "sakit",
+)
+_LEAVE_REQUEST_CUES = (
+    "want",
+    "take",
+    "prepare",
+    "request",
+    "book",
+    "ajukan",
+    "siapkan",
+    "ambil",
+    "mau",
+)
+_RELATIVE_DATE_WORDS = (
+    "next week",
+    "this week",
+    "minggu depan",
+    "minggu ini",
+    "tomorrow",
+    "besok",
+)
+_CLARIFY_WORDS = (
+    "how many",
+    "which type",
+    "what type",
+    "leave type",
+    "berapa",
+    "jenis",
+    "kapan",
+    "when",
+)
+_DEFAULT_LEAVE_CLARIFY = (
+    "I can help prepare that leave. Which type do you need "
+    "(annual, sick, or parental), and how many business days?"
+)
 
 
 def mentions_other_employee(message: str, auth: AuthContext, profiles: list[AuthContext]) -> bool:
@@ -86,6 +128,37 @@ def signed_in_balance_answer(display_name: str, balances: list[dict[str, Any]]) 
     return (
         f"I can only show your balance. {display_name} has {detail}."
     )
+
+
+def conversation_text(history: list[dict[str, Any]], message: str) -> str:
+    """Join prior turns with the new message so short follow-ups keep leave context."""
+    parts = [str(item.get("content", "")) for item in history]
+    parts.append(message)
+    return "\n".join(parts)
+
+
+def is_leave_request_intent(
+    message: str, history: list[dict[str, Any]] | None = None
+) -> bool:
+    """True when this thread is a leave request, including short follow-ups like '2 days'."""
+    text = conversation_text(history or [], message).casefold()
+    has_leave = any(word in text for word in _LEAVE_WORDS)
+    if not has_leave:
+        return False
+    has_request = any(word in text for word in _LEAVE_REQUEST_CUES)
+    has_relative = any(word in text for word in _RELATIVE_DATE_WORDS)
+    return has_request or has_relative
+
+
+def is_clarifying_question(answer: str) -> bool:
+    """True when the model is asking for missing leave details."""
+    text = answer.strip()
+    if not text:
+        return False
+    if "?" in text or "？" in text:
+        return True
+    lower = text.casefold()
+    return any(word in lower for word in _CLARIFY_WORDS)
 
 
 class AgentService:
@@ -134,6 +207,7 @@ class AgentService:
         outcome = Outcome.abstained
         citations: list[Citation] = []
         conversation_id, history = self._bind_conversation(request, auth)
+        leave_intake = is_leave_request_intent(request.message, history)
         balance_rows: list[dict[str, Any]] | None = None
         used_balance = False
         messages: list[dict[str, Any]] = [
@@ -272,8 +346,12 @@ class AgentService:
                     answer = answer or "An HR ticket was created for follow-up."
                 elif used_balance and answer:
                     outcome = Outcome.answered
+                elif answer and leave_intake and is_clarifying_question(answer):
+                    # Incomplete leave requests may ask for type or duration with no tool.
+                    outcome = Outcome.answered
+                    citations = []
                 elif answer:
-                    # Free-form answers without tools/citations are not allowed.
+                    # Free-form policy answers without tools/citations are not allowed.
                     outcome = Outcome.abstained
                     answer = (
                         "I do not have enough policy evidence to answer that question."
@@ -314,6 +392,20 @@ class AgentService:
                     for item in self.repository.get_balances(auth.employee_id)
                 ]
             answer = signed_in_balance_answer(auth.display_name, balance_rows)
+            citations = []
+            outcome = Outcome.answered
+        elif (
+            error is None
+            and action_proposal is None
+            and not tool_summaries
+            and leave_intake
+            and (
+                outcome == Outcome.abstained
+                or not is_clarifying_question(answer)
+            )
+        ):
+            # Keep leave intakes moving when the model abstains or invents a non-question.
+            answer = _DEFAULT_LEAVE_CLARIFY
             citations = []
             outcome = Outcome.answered
 

@@ -147,6 +147,63 @@ def test_ungrounded_answer_is_abstained(repository: MemoryRepository) -> None:
     assert response.outcome == "abstained"
 
 
+class LeaveClarifyProvider:
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        return ModelTurn(
+            response_id="clarify",
+            text="Which leave type do you need, and how many business days next week?",
+        )
+
+
+class LeaveSilentProvider:
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        return ModelTurn(response_id="silent", text="Leave approved for everyone.")
+
+
+def test_incomplete_leave_request_keeps_clarifying_question(
+    repository: MemoryRepository,
+) -> None:
+    response = service(repository, LeaveClarifyProvider()).run(
+        ChatRequest(message="I want to take leave next week"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "answered"
+    assert "how many" in response.answer.lower()
+    assert response.action_proposal is None
+
+
+def test_incomplete_leave_request_gets_default_clarify_when_model_invents(
+    repository: MemoryRepository,
+) -> None:
+    response = service(repository, LeaveSilentProvider()).run(
+        ChatRequest(message="I want to take leave next week"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "answered"
+    assert "Which type do you need" in response.answer
+    assert "approved" not in response.answer.lower()
+
+
+def test_short_leave_follow_up_keeps_thread_context(
+    repository: MemoryRepository,
+) -> None:
+    auth = AuthContext(employee_id="EMP-001", display_name="Alya")
+    agent = service(repository, LeaveClarifyProvider())
+    first = agent.run(ChatRequest(message="I want to take leave next week"), auth)
+    second = agent.run(
+        ChatRequest(message="2 days", conversation_id=first.conversation_id),
+        auth,
+    )
+    assert second.outcome == "answered"
+    assert "I do not have enough policy evidence" not in second.answer
+
+
 def test_failed_prepare_forces_abstention(repository: MemoryRepository) -> None:
     response = service(repository, FailedPrepareProvider()).run(
         ChatRequest(message="Ajukan cuti tahunan 2025-01-02"),
