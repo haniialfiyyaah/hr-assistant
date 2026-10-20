@@ -20,7 +20,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  getIdempotencyKey,
   readConversationId,
   readThread,
   writeConversationId,
@@ -106,7 +105,6 @@ export function ChatThread() {
   const [draft, setDraft] = useState("");
   const [hydrating, setHydrating] = useState(true);
   const [sending, setSending] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -219,26 +217,8 @@ export function ChatThread() {
     }
   }
 
-  async function confirmProposal(proposalId: string) {
-    setConfirming(proposalId);
-    try {
-      const result = await apiRequest<{
-        request_id: string;
-        status: string;
-        idempotent_replay?: boolean;
-      }>("POST", API_PATHS.confirm(proposalId), session.demoToken, {
-        idempotency_key: getIdempotencyKey(proposalId),
-      });
-      toast.success(
-        `Created ${result.request_id} (${result.status})${
-          result.idempotent_replay ? " — idempotent replay" : ""
-        }`,
-      );
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Confirm failed");
-    } finally {
-      setConfirming(null);
-    }
+  function confirmFromChat() {
+    void sendMessage("confirm");
   }
 
   async function startNewChat() {
@@ -378,8 +358,8 @@ export function ChatThread() {
                     {message.response ? (
                       <AssistantExtras
                         response={message.response}
-                        confirming={confirming}
-                        onConfirm={confirmProposal}
+                        confirming={sending}
+                        onConfirm={confirmFromChat}
                       />
                     ) : null}
                   </div>
@@ -469,8 +449,8 @@ function AssistantExtras({
   onConfirm,
 }: {
   response: ChatResponsePayload;
-  confirming: string | null;
-  onConfirm: (proposalId: string) => void;
+  confirming: boolean;
+  onConfirm: () => void;
 }) {
   const proposal = response.action_proposal;
   return (
@@ -544,7 +524,7 @@ function AssistantExtras({
                 Leave proposal ready
               </p>
               <p className="mt-0.5 text-xs leading-relaxed text-teal-900/70">
-                Not created yet. Confirm to open pending manager review.
+                Not created yet. Use the button or type confirm in chat.
               </p>
             </div>
           </div>
@@ -579,17 +559,15 @@ function AssistantExtras({
             <Button
               className="w-full rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.98] sm:w-auto"
               size="sm"
-              disabled={confirming === proposal.proposal_id}
-              onClick={() => onConfirm(proposal.proposal_id)}
+              disabled={confirming}
+              onClick={onConfirm}
             >
-              {confirming === proposal.proposal_id ? (
+              {confirming ? (
                 <LoaderCircle className="animate-spin" data-icon="inline-start" />
               ) : (
                 <CheckCircle2 data-icon="inline-start" />
               )}
-              {confirming === proposal.proposal_id
-                ? "Confirming…"
-                : "Confirm pending leave request"}
+              {confirming ? "Confirming…" : "Confirm pending leave request"}
             </Button>
           </div>
         </div>

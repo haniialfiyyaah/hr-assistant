@@ -11,12 +11,13 @@ from .config import Settings
 from .contracts import (
     ActionProposal,
     AuthContext,
+    ConfirmLeaveArgs,
     PrepareLeaveArgs,
     SearchPolicyArgs,
     TicketArgs,
 )
 from .domain import DomainError, validate_leave_request
-from .repository import Repository
+from .repository import ConflictError, Repository
 from .retrieval import RetrievalService
 
 
@@ -72,6 +73,21 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "reason": {"type": ["string", "null"], "maxLength": 300},
         },
         required=["start_date", "end_date", "leave_type", "reason"],
+    ),
+    _function_schema(
+        name="confirm_leave_request",
+        description=(
+            "Confirm a pending leave proposal after the user clearly agrees "
+            "(for example confirm, yes, setuju, or ya). Creates a pending_manager_review "
+            "request. Does not approve leave."
+        ),
+        properties={
+            "proposal_id": {
+                "type": ["string", "null"],
+                "description": "Proposal id from the pending leave proposal, or null for the latest open one.",
+            },
+        },
+        required=["proposal_id"],
     ),
     _function_schema(
         name="create_hr_ticket",
@@ -153,6 +169,29 @@ class ToolExecutor:
             )
             self.repository.save_proposal(auth.employee_id, proposal)
             return proposal.model_dump(mode="json"), proposal
+
+        if name == "confirm_leave_request":
+            args = ConfirmLeaveArgs.model_validate(arguments)
+            proposal_id = args.proposal_id
+            if not proposal_id:
+                latest = self.repository.latest_open_proposal(auth.employee_id)
+                if latest is None:
+                    raise DomainError("No pending leave proposal to confirm.")
+                proposal_id = latest.proposal_id
+            found = self.repository.get_proposal(proposal_id)
+            if found is None or found[0] != auth.employee_id:
+                raise DomainError("Pending leave proposal not found.")
+            # Same stable key as the chat UI confirm button for this proposal.
+            idempotency_key = f"confirm-{auth.employee_id}-{proposal_id}"
+            try:
+                result = self.repository.confirm_proposal(
+                    auth.employee_id, proposal_id, idempotency_key
+                )
+            except KeyError as exc:
+                raise DomainError("Pending leave proposal not found.") from exc
+            except ConflictError as exc:
+                raise DomainError(str(exc)) from exc
+            return result.model_dump(mode="json"), None
 
         if name == "create_hr_ticket":
             from .security import redact

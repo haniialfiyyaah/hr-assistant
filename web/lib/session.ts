@@ -131,16 +131,7 @@ export function writeConversationId(
   sessionStorage.setItem(key, conversationId);
 }
 
-export function getIdempotencyKey(proposalId: string): string {
-  const key = `${IDEM_PREFIX}${proposalId}`;
-  const existing = sessionStorage.getItem(key);
-  if (existing) {
-    return existing;
-  }
-  const generated =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  sessionStorage.setItem(key, generated);
-  return generated;
+/** Stable across the Confirm button and chat "confirm" for the same proposal. */
+export function getIdempotencyKey(proposalId: string, employeeId: string): string {
+  return `confirm-${employeeId}-${proposalId}`;
 }

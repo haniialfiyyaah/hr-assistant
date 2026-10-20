@@ -31,6 +31,8 @@ class Repository(Protocol):
     def has_overlap(self, employee_id: str, start: date, end: date) -> bool: ...
     def save_proposal(self, employee_id: str, proposal: ActionProposal) -> None: ...
     def get_proposal(self, proposal_id: str) -> tuple[str, ActionProposal] | None: ...
+    def proposal_request_id(self, proposal_id: str) -> str | None: ...
+    def latest_open_proposal(self, employee_id: str) -> ActionProposal | None: ...
     def confirm_proposal(self, employee_id: str, proposal_id: str, idempotency_key: str) -> ActionResult: ...
     def list_leave_requests(self, employee_id: str) -> list[LeaveRequestView]: ...
     def create_ticket(self, employee_id: str, category: str, summary: str) -> str: ...
@@ -150,6 +152,31 @@ class MemoryRepository:
         if row is None:
             return None
         return row["employee_id"], row["proposal"]
+
+    def proposal_request_id(self, proposal_id: str) -> str | None:
+        row = self._proposals.get(proposal_id)
+        if row is None:
+            return None
+        request_id = row.get("request_id")
+        return str(request_id) if request_id else None
+
+    def latest_open_proposal(self, employee_id: str) -> ActionProposal | None:
+        now = datetime.now(timezone.utc)
+        open_items: list[ActionProposal] = []
+        for row in self._proposals.values():
+            if row["employee_id"] != employee_id or row.get("request_id"):
+                continue
+            proposal: ActionProposal = row["proposal"]
+            expires_at = proposal.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < now:
+                continue
+            open_items.append(proposal)
+        if not open_items:
+            return None
+        open_items.sort(key=lambda item: item.expires_at, reverse=True)
+        return open_items[0]
 
     def confirm_proposal(
         self, employee_id: str, proposal_id: str, idempotency_key: str
@@ -549,6 +576,48 @@ class PostgresRepository:
             expires_at=row[8],
         )
         return row[0], proposal
+
+    def proposal_request_id(self, proposal_id: str) -> str | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT request_id FROM action_proposals WHERE proposal_id = %s",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
+    def latest_open_proposal(self, employee_id: str) -> ActionProposal | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT proposal_id, leave_type, start_date, end_date, business_days,
+                           reason, validation_summary, expires_at
+                    FROM action_proposals
+                    WHERE employee_id = %s
+                      AND request_id IS NULL
+                      AND expires_at > NOW()
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (employee_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return ActionProposal(
+            proposal_id=row[0],
+            leave_type=row[1],
+            start_date=row[2],
+            end_date=row[3],
+            business_days=row[4],
+            reason=row[5],
+            validation_summary=list(row[6] or []),
+            expires_at=row[7],
+        )
 
     def confirm_proposal(
         self, employee_id: str, proposal_id: str, idempotency_key: str

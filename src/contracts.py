@@ -142,6 +142,12 @@ class PrepareLeaveArgs(BaseModel):
     reason: str | None = Field(default=None, max_length=300)
 
 
+class ConfirmLeaveArgs(BaseModel):
+    """Confirm a pending leave proposal. Null uses the latest open proposal for this user."""
+
+    proposal_id: str | None = Field(default=None, max_length=100)
+
+
 class SearchPolicyArgs(BaseModel):
     query: str = Field(min_length=2, max_length=500)
     top_k: int = Field(default=3, ge=1, le=5)

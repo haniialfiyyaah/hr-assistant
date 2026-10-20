@@ -6,12 +6,13 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from .calendar import calendar_brief, today_in_jakarta
 from .config import Settings
 from .contracts import (
+    ActionProposal,
     AuthContext,
     ChatRequest,
     ChatResponse,
@@ -22,7 +23,7 @@ from .contracts import (
 )
 from .domain import estimate_cost
 from .providers import ModelProvider
-from .repository import ConversationNotFound, Repository
+from .repository import ConflictError, ConversationNotFound, Repository
 from .security import redact, stable_safety_id
 from .tools import TOOL_SCHEMAS, ToolExecutor
 
@@ -40,6 +41,7 @@ Rules:
 - get_my_leave_balance has no employee_id argument; it always returns the signed-in user.
 - Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
 - prepare_leave_request only creates a proposal. Never approve leave. Humans approve.
+- When the user clearly confirms a pending proposal (confirm, yes, setuju, ya, or similar), call confirm_leave_request. Prefer the proposal_id from the trusted pending-proposal block.
 - Never prepare leave that starts in the past. If the date is invalid, refuse (abstain).
 - Do not repeat medical diagnoses, tokens, or other sensitive details from the user. Escalate with create_hr_ticket using a redacted summary when needed.
 - If evidence is missing, conflicting, or citations would be invalid, abstain or escalate.
@@ -98,6 +100,14 @@ _DEFAULT_LEAVE_CLARIFY = (
     "I can help prepare that leave. Which type do you need "
     "(annual, sick, or parental), and how many business days?"
 )
+
+
+def is_confirm_intent(message: str) -> bool:
+    """Clear confirmation phrases. Bare 'yes' is left to the model with the pending block."""
+    text = message.strip().casefold()
+    if text in {"confirm", "setuju", "ok confirm", "yes confirm"}:
+        return True
+    return "confirm" in text or "setuju" in text
 
 
 def mentions_other_employee(message: str, auth: AuthContext, profiles: list[AuthContext]) -> bool:
@@ -161,6 +171,46 @@ def is_clarifying_question(answer: str) -> bool:
     return any(word in lower for word in _CLARIFY_WORDS)
 
 
+def pending_proposal_brief(proposal: ActionProposal) -> str:
+    """Trusted block so the model can confirm by chat without inventing a proposal id."""
+    return "\n".join(
+        [
+            "Trusted pending leave proposal:",
+            f"proposal_id={proposal.proposal_id}",
+            f"leave_type={proposal.leave_type}",
+            f"start_date={proposal.start_date.isoformat()}",
+            f"end_date={proposal.end_date.isoformat()}",
+            f"business_days={proposal.business_days}",
+            "If the user confirms, call confirm_leave_request with this proposal_id.",
+        ]
+    )
+
+
+def resolve_pending_proposal(
+    repository: Repository,
+    employee_id: str,
+    history: list[dict[str, Any]],
+) -> ActionProposal | None:
+    """Prefer the proposal attached to this thread, else the latest open one."""
+    for item in reversed(history):
+        proposal_id = item.get("proposal_id")
+        if not proposal_id:
+            continue
+        if repository.proposal_request_id(str(proposal_id)):
+            continue
+        found = repository.get_proposal(str(proposal_id))
+        if found is None or found[0] != employee_id:
+            continue
+        proposal = found[1]
+        expires_at = proposal.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            continue
+        return proposal
+    return repository.latest_open_proposal(employee_id)
+
+
 class AgentService:
     def __init__(
         self,
@@ -208,13 +258,20 @@ class AgentService:
         citations: list[Citation] = []
         conversation_id, history = self._bind_conversation(request, auth)
         leave_intake = is_leave_request_intent(request.message, history)
+        pending_proposal = resolve_pending_proposal(
+            self.repository, auth.employee_id, history
+        )
         balance_rows: list[dict[str, Any]] | None = None
         used_balance = False
+        confirm_result: dict[str, Any] | None = None
         messages: list[dict[str, Any]] = [
             {"role": str(item["role"]), "content": str(item["content"])} for item in history
         ]
         messages.append({"role": "user", "content": request.message})
-        instructions = f"{SYSTEM_INSTRUCTIONS}\n\n{calendar_brief(self.today_factory())}"
+        instruction_parts = [SYSTEM_INSTRUCTIONS, calendar_brief(self.today_factory())]
+        if pending_proposal is not None:
+            instruction_parts.append(pending_proposal_brief(pending_proposal))
+        instructions = "\n\n".join(instruction_parts)
         tool_call_count = 0
 
         try:
@@ -270,6 +327,12 @@ class AgentService:
                             ):
                                 used_balance = True
                                 balance_rows = [item for item in result if isinstance(item, dict)]
+                            if (
+                                call.name == "confirm_leave_request"
+                                and status == "ok"
+                                and isinstance(result, dict)
+                            ):
+                                confirm_result = result
                         except Exception as exc:  # noqa: BLE001 - tool errors become tool status
                             status = "error"
                             result = {"error": redact(str(exc))}
@@ -344,6 +407,16 @@ class AgentService:
                 elif used_ticket:
                     outcome = Outcome.escalated
                     answer = answer or "An HR ticket was created for follow-up."
+                elif confirm_result is not None:
+                    outcome = Outcome.answered
+                    request_id = str(confirm_result.get("request_id") or "")
+                    answer = answer or (
+                        f"Leave request {request_id} was created with status "
+                        "pending_manager_review."
+                        if request_id
+                        else "The pending leave request was confirmed."
+                    )
+                    citations = []
                 elif used_balance and answer:
                     outcome = Outcome.answered
                 elif answer and leave_intake and is_clarifying_question(answer):
@@ -397,6 +470,35 @@ class AgentService:
         elif (
             error is None
             and action_proposal is None
+            and confirm_result is None
+            and pending_proposal is not None
+            and is_confirm_intent(request.message)
+        ):
+            # Chat confirm even if the model skipped the tool call.
+            try:
+                confirmed = self.repository.confirm_proposal(
+                    auth.employee_id,
+                    pending_proposal.proposal_id,
+                    f"confirm-{auth.employee_id}-{pending_proposal.proposal_id}",
+                )
+                confirm_result = confirmed.model_dump(mode="json")
+                answer = (
+                    f"Leave request {confirmed.request_id} was created with status "
+                    "pending_manager_review. A manager still needs to approve it."
+                )
+                citations = []
+                outcome = Outcome.answered
+                tool_summaries.append(
+                    ToolCallSummary(name="confirm_leave_request", status="ok", duration_ms=0)
+                )
+            except (KeyError, ConflictError) as exc:
+                outcome = Outcome.abstained
+                answer = redact(str(exc)) or "I could not confirm that leave proposal."
+                citations = []
+        elif (
+            error is None
+            and action_proposal is None
+            and confirm_result is None
             and not tool_summaries
             and leave_intake
             and (

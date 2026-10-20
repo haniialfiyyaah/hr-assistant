@@ -164,6 +164,8 @@ def create_app(
         """Return a proposal the employee can still confirm."""
         if not proposal_id:
             return None
+        if repository.proposal_request_id(proposal_id):
+            return None
         found = repository.get_proposal(proposal_id)
         if found is None or found[0] != employee_id:
             return None
