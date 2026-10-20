@@ -24,6 +24,7 @@ EMPLOYEES_PATH = ROOT / "data" / "employees.json"
 class Repository(Protocol):
     def health(self) -> bool: ...
     def authenticate(self, token: str) -> AuthContext | None: ...
+    def list_profiles(self) -> list[AuthContext]: ...
     def lexical_search(self, query: str, limit: int) -> list[PolicyChunk]: ...
     def vector_search(self, embedding: list[float], limit: int) -> list[PolicyChunk]: ...
     def get_balances(self, employee_id: str) -> list[LeaveBalance]: ...
@@ -97,6 +98,12 @@ class MemoryRepository:
 
     def authenticate(self, token: str) -> AuthContext | None:
         return self._token_to_auth.get(token_hash(token))
+
+    def list_profiles(self) -> list[AuthContext]:
+        profiles: dict[str, AuthContext] = {}
+        for auth in self._token_to_auth.values():
+            profiles[auth.employee_id] = auth
+        return list(profiles.values())
 
     def lexical_search(self, query: str, limit: int) -> list[PolicyChunk]:
         terms = [term.lower() for term in query.split() if term.strip()]
@@ -372,6 +379,16 @@ class PostgresRepository:
         if row is None:
             return None
         return AuthContext(employee_id=row[0], display_name=row[1], role=row[2])
+
+    def list_profiles(self) -> list[AuthContext]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT employee_id, display_name, role FROM employees")
+                rows = cur.fetchall()
+        return [
+            AuthContext(employee_id=row[0], display_name=row[1], role=row[2])
+            for row in rows
+        ]
 
     def lexical_search(self, query: str, limit: int) -> list[PolicyChunk]:
         with self.pool.connection() as conn:

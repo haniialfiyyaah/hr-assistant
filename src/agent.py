@@ -38,6 +38,7 @@ Rules:
 - For any policy or benefit question, call search_hr_policy first. If nothing relevant is found, say you cannot answer (abstain). Do not invent policies.
 - Identity comes from the server session. Never look up another employee's private data.
 - get_my_leave_balance has no employee_id argument; it always returns the signed-in user.
+- Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
 - prepare_leave_request only creates a proposal. Never approve leave. Humans approve.
 - Never prepare leave that starts in the past. If the date is invalid, refuse (abstain).
 - Do not repeat medical diagnoses, tokens, or other sensitive details from the user. Escalate with create_hr_ticket using a redacted summary when needed.
@@ -54,6 +55,37 @@ Rules:
 
 # Prior turns sent back to the model. The new user message is added on top.
 HISTORY_LIMIT = 12
+_BALANCE_WORDS = ("balance", "balances", "saldo")
+
+
+def mentions_other_employee(message: str, auth: AuthContext, profiles: list[AuthContext]) -> bool:
+    """True when the user names an employee other than the signed-in one."""
+    haystack = message.casefold()
+    for profile in profiles:
+        if profile.employee_id == auth.employee_id:
+            continue
+        if profile.employee_id.casefold() in haystack:
+            return True
+        full_name = profile.display_name.casefold()
+        if full_name and full_name in haystack:
+            return True
+        for part in profile.display_name.split():
+            if len(part) >= 4 and part.casefold() in haystack:
+                return True
+    return False
+
+
+def signed_in_balance_answer(display_name: str, balances: list[dict[str, Any]]) -> str:
+    """State the tool result under the signed-in name only."""
+    parts = [
+        f"{item.get('leave_type')} {item.get('available_days')}"
+        for item in balances
+        if item.get("leave_type") is not None
+    ]
+    detail = ", ".join(parts) if parts else "no days on record"
+    return (
+        f"I can only show your balance. {display_name} has {detail}."
+    )
 
 
 class AgentService:
@@ -102,6 +134,8 @@ class AgentService:
         outcome = Outcome.abstained
         citations: list[Citation] = []
         conversation_id, history = self._bind_conversation(request, auth)
+        balance_rows: list[dict[str, Any]] | None = None
+        used_balance = False
         messages: list[dict[str, Any]] = [
             {"role": str(item["role"]), "content": str(item["content"])} for item in history
         ]
@@ -155,6 +189,13 @@ class AgentService:
                                     document_id = str(item.get("document_id", ""))
                                     if document_id:
                                         retrieved_by_document[document_id] = item
+                            if (
+                                call.name == "get_my_leave_balance"
+                                and status == "ok"
+                                and isinstance(result, list)
+                            ):
+                                used_balance = True
+                                balance_rows = [item for item in result if isinstance(item, dict)]
                         except Exception as exc:  # noqa: BLE001 - tool errors become tool status
                             status = "error"
                             result = {"error": redact(str(exc))}
@@ -181,7 +222,6 @@ class AgentService:
                     item.name == "prepare_leave_request" and item.status == "error"
                     for item in tool_summaries
                 )
-                used_balance = any(item.name == "get_my_leave_balance" for item in tool_summaries)
                 used_ticket = any(item.name == "create_hr_ticket" for item in tool_summaries)
 
                 if prepare_failed and action_proposal is None:
@@ -254,6 +294,28 @@ class AgentService:
             outcome = Outcome.abstained
             answer = "I cannot complete that request right now."
             citations = []
+
+        # The balance tool is always the signed-in employee. Do not let the model
+        # attach another person's name to those figures.
+        balance_topic = used_balance or any(
+            word in request.message.casefold() for word in _BALANCE_WORDS
+        )
+        if (
+            error is None
+            and action_proposal is None
+            and balance_topic
+            and mentions_other_employee(
+                request.message, auth, self.repository.list_profiles()
+            )
+        ):
+            if balance_rows is None:
+                balance_rows = [
+                    item.model_dump(mode="json")
+                    for item in self.repository.get_balances(auth.employee_id)
+                ]
+            answer = signed_in_balance_answer(auth.display_name, balance_rows)
+            citations = []
+            outcome = Outcome.answered
 
         answer = redact(answer)
         latency_ms = int((time.perf_counter() - started) * 1000)
