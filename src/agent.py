@@ -197,6 +197,17 @@ def is_clarifying_question(answer: str) -> bool:
     return any(word in lower for word in _CLARIFY_WORDS)
 
 
+def tool_argument_summary(arguments: dict[str, Any]) -> dict[str, str]:
+    """Short redacted tool args for the step timeline (not full payloads)."""
+    summary: dict[str, str] = {}
+    for key, value in arguments.items():
+        text = redact(str(value))
+        if len(text) > 96:
+            text = f"{text[:93]}..."
+        summary[str(key)] = text
+    return summary
+
+
 def pending_proposal_brief(proposal: ActionProposal) -> str:
     """Trusted block so the model can confirm by chat without inventing a proposal id."""
     return "\n".join(
@@ -274,6 +285,7 @@ class AgentService:
         started = time.perf_counter()
         trace_id = str(uuid.uuid4())
         retrieved_by_document: dict[str, dict[str, Any]] = {}
+        retrieved_chunks: dict[str, dict[str, Any]] = {}
         tool_summaries: list[ToolCallSummary] = []
         action_proposal = None
         input_tokens = 0
@@ -299,9 +311,10 @@ class AgentService:
             instruction_parts.append(pending_proposal_brief(pending_proposal))
         instructions = "\n\n".join(instruction_parts)
         tool_call_count = 0
+        steps: list[dict[str, Any]] = []
 
         try:
-            for _ in range(self.settings.max_agent_turns):
+            for turn_index in range(1, self.settings.max_agent_turns + 1):
                 if tool_call_count >= self.settings.max_tool_calls:
                     break
 
@@ -314,6 +327,21 @@ class AgentService:
                 )
                 input_tokens += turn.input_tokens
                 output_tokens += turn.output_tokens
+                model_step: dict[str, Any] = {
+                    "kind": "model",
+                    "turn": turn_index,
+                    "input_tokens": turn.input_tokens,
+                    "output_tokens": turn.output_tokens,
+                    "tool_call_count": len(turn.tool_calls),
+                }
+                preview_text = redact((turn.text or "").strip())
+                if preview_text:
+                    model_step["answer_preview"] = (
+                        preview_text
+                        if len(preview_text) <= 160
+                        else f"{preview_text[:157]}..."
+                    )
+                steps.append(model_step)
 
                 if turn.tool_calls:
                     # Prefer provider output items so live Responses API can continue the loop.
@@ -344,7 +372,11 @@ class AgentService:
                             if call.name == "search_hr_policy" and isinstance(result, list):
                                 for item in result:
                                     document_id = str(item.get("document_id", ""))
+                                    chunk_id = str(item.get("chunk_id") or document_id)
+                                    if chunk_id:
+                                        retrieved_chunks[chunk_id] = item
                                     if document_id:
+                                        # Keep one row per document for citation grounding.
                                         retrieved_by_document[document_id] = item
                             if (
                                 call.name == "get_my_leave_balance"
@@ -362,12 +394,25 @@ class AgentService:
                         except Exception as exc:  # noqa: BLE001 - tool errors become tool status
                             status = "error"
                             result = {"error": redact(str(exc))}
+                        duration_ms = int((time.perf_counter() - tool_started) * 1000)
                         tool_summaries.append(
                             ToolCallSummary(
                                 name=call.name,
                                 status=status,  # type: ignore[arg-type]
-                                duration_ms=int((time.perf_counter() - tool_started) * 1000),
+                                duration_ms=duration_ms,
                             )
+                        )
+                        steps.append(
+                            {
+                                "kind": "tool",
+                                "turn": turn_index,
+                                "name": call.name,
+                                "status": status,
+                                "duration_ms": duration_ms,
+                                "arguments": tool_argument_summary(
+                                    call.arguments if isinstance(call.arguments, dict) else {}
+                                ),
+                            }
                         )
                         messages.append(
                             {
@@ -517,6 +562,16 @@ class AgentService:
                 tool_summaries.append(
                     ToolCallSummary(name="confirm_leave_request", status="ok", duration_ms=0)
                 )
+                steps.append(
+                    {
+                        "kind": "tool",
+                        "turn": (steps[-1]["turn"] if steps else 1),
+                        "name": "confirm_leave_request",
+                        "status": "ok",
+                        "duration_ms": 0,
+                        "arguments": {"source": "chat_confirm_fallback"},
+                    }
+                )
             except (KeyError, ConflictError) as exc:
                 outcome = Outcome.abstained
                 answer = redact(str(exc)) or "I could not confirm that leave proposal."
@@ -572,19 +627,38 @@ class AgentService:
         )
         retrieved_documents = [
             {
-                "document_id": document_id,
-                "title": str(item.get("title", document_id)),
+                "chunk_id": chunk_id,
+                "document_id": str(item.get("document_id", chunk_id)),
+                "title": str(item.get("title", item.get("document_id", chunk_id))),
                 "section": str(item.get("section", "")),
-                "excerpt": str(item.get("content", ""))[:280],
             }
-            for document_id, item in sorted(retrieved_by_document.items())
+            for chunk_id, item in sorted(retrieved_chunks.items())
         ]
+        agent_model = str(
+            getattr(self.provider, "agent_model", None) or self.settings.agent_model or "fake"
+        )
+        embedding_model = str(
+            getattr(self.provider, "embedding_model", None)
+            or self.settings.embedding_model
+            or "fake"
+        )
         self.repository.save_trace(
             {
                 "trace_id": trace_id,
                 "employee_id": auth.employee_id,
                 "outcome": outcome.value,
-                "retrieved_document_ids": [item["document_id"] for item in retrieved_documents],
+                "model_mode": self.settings.model_mode,
+                "agent_model": agent_model,
+                "embedding_model": embedding_model,
+                "turn_count": max((int(step["turn"]) for step in steps), default=0),
+                "steps": steps,
+                "retrieved_document_ids": sorted(
+                    {
+                        str(item.get("document_id", ""))
+                        for item in retrieved_chunks.values()
+                        if item.get("document_id")
+                    }
+                ),
                 "retrieved_documents": retrieved_documents,
                 "citations": [item.model_dump() for item in citations],
                 "tool_calls": [item.model_dump() for item in tool_summaries],

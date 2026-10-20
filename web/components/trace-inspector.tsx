@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, BookOpen, LoaderCircle, Wrench } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  LoaderCircle,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
 import { Badge } from "@/components/ui/badge";
@@ -17,16 +23,35 @@ import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface TraceDocument {
+  chunk_id?: string;
   document_id: string;
   title?: string;
   section?: string;
   excerpt?: string;
 }
 
+interface TraceStep {
+  kind: "model" | "tool" | string;
+  turn: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  tool_call_count?: number;
+  answer_preview?: string;
+  name?: string;
+  status?: string;
+  duration_ms?: number;
+  arguments?: Record<string, string>;
+}
+
 export interface TracePayload {
   trace_id: string;
   employee_id: string;
   outcome: string;
+  model_mode?: string;
+  agent_model?: string;
+  embedding_model?: string;
+  turn_count?: number;
+  steps?: TraceStep[];
   retrieved_document_ids: string[];
   retrieved_documents?: TraceDocument[];
   citations?: TraceDocument[];
@@ -67,6 +92,59 @@ function PolicyDocCard({ doc }: { doc: TraceDocument }) {
       ) : null}
       {doc.excerpt ? (
         <p className="mt-1.5 leading-relaxed text-stone-500">{doc.excerpt}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function StepCard({ step }: { step: TraceStep }) {
+  if (step.kind === "tool") {
+    return (
+      <div className="rounded-xl border border-stone-200/80 bg-white px-3 py-2.5">
+        <div className="flex items-center gap-1.5">
+          <Wrench className="size-3.5 text-stone-500" />
+          <p className="text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+            Turn {step.turn} · Tool
+          </p>
+        </div>
+        <p className="mt-1 font-mono text-xs font-medium text-stone-800">
+          {step.name}
+        </p>
+        <p className="mt-0.5 text-[11px] text-stone-500">
+          {step.status ?? "—"} · {step.duration_ms ?? 0} ms
+        </p>
+        {step.arguments && Object.keys(step.arguments).length ? (
+          <dl className="mt-2 space-y-1 border-t border-stone-100 pt-2">
+            {Object.entries(step.arguments).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-[5.5rem_1fr] gap-2 text-[11px]">
+                <dt className="font-mono text-stone-400">{key}</dt>
+                <dd className="break-words text-stone-600">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-stone-200/80 bg-stone-50/90 px-3 py-2.5">
+      <div className="flex items-center gap-1.5">
+        <Sparkles className="size-3.5 text-teal-800" />
+        <p className="text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+          Turn {step.turn} · Model
+        </p>
+      </div>
+      <p className="mt-1 text-[11px] text-stone-500">
+        in {step.input_tokens ?? 0} · out {step.output_tokens ?? 0}
+        {typeof step.tool_call_count === "number"
+          ? ` · ${step.tool_call_count} tool call(s)`
+          : ""}
+      </p>
+      {step.answer_preview ? (
+        <p className="mt-1.5 text-xs leading-relaxed text-stone-600">
+          {step.answer_preview}
+        </p>
       ) : null}
     </div>
   );
@@ -122,7 +200,12 @@ export function TraceInspector({
   }, [open, traceId, user]);
 
   const citations = trace?.citations ?? [];
-  const retrievedIds = trace?.retrieved_document_ids ?? [];
+  const retrievedChunks: TraceDocument[] = trace?.retrieved_documents?.length
+    ? trace.retrieved_documents
+    : (trace?.retrieved_document_ids ?? []).map((document_id) => ({
+        document_id,
+      }));
+  const steps = trace?.steps ?? [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -173,6 +256,33 @@ export function TraceInspector({
                   <Badge variant="outline" className="font-mono text-[10px]">
                     {trace.employee_id}
                   </Badge>
+                  {typeof trace.turn_count === "number" ? (
+                    <Badge variant="outline" className="text-[10px]">
+                      {trace.turn_count} turn
+                      {trace.turn_count === 1 ? "" : "s"}
+                    </Badge>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="space-y-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+                  <Sparkles className="size-3.5" />
+                  Models
+                </p>
+                <div className="rounded-xl border border-stone-200/80 bg-stone-50/90 px-3 py-2.5 text-xs text-stone-700">
+                  <p>
+                    <span className="text-stone-400">Mode · </span>
+                    {trace.model_mode ?? "—"}
+                  </p>
+                  <p className="mt-1 font-mono">
+                    <span className="font-sans text-stone-400">Agent · </span>
+                    {trace.agent_model ?? "—"}
+                  </p>
+                  <p className="mt-1 font-mono">
+                    <span className="font-sans text-stone-400">Embed · </span>
+                    {trace.embedding_model ?? "—"}
+                  </p>
                 </div>
               </section>
 
@@ -201,6 +311,27 @@ export function TraceInspector({
 
               <section className="space-y-2">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+                  <Activity className="size-3.5" />
+                  Steps
+                </p>
+                {steps.length ? (
+                  <div className="flex flex-col gap-2">
+                    {steps.map((step, index) => (
+                      <StepCard
+                        key={`${step.kind}-${step.turn}-${step.name ?? "model"}-${index}`}
+                        step={step}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-stone-400">
+                    No step timeline on this older trace.
+                  </p>
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
                   <BookOpen className="size-3.5" />
                   Policy sources
                 </p>
@@ -223,44 +354,26 @@ export function TraceInspector({
                   <BookOpen className="size-3.5" />
                   Retrieved policies
                 </p>
-                {retrievedIds.length ? (
+                <p className="text-[11px] leading-relaxed text-stone-400">
+                  One row per chunk. The same document_id can appear more than
+                  once with different sections.
+                </p>
+                {retrievedChunks.length ? (
                   <div className="flex flex-col gap-2">
-                    {retrievedIds.map((docId) => (
+                    {retrievedChunks.map((doc, index) => (
                       <div
-                        key={docId}
+                        key={doc.chunk_id ?? `${doc.document_id}-${doc.section ?? index}`}
                         className="rounded-xl border border-stone-200/80 bg-stone-50/90 p-3 text-xs"
                       >
-                        <p className="font-medium text-stone-800">{docId}</p>
+                        <p className="font-medium text-stone-800">
+                          {doc.document_id}
+                          {doc.section ? ` — ${doc.section}` : ""}
+                        </p>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="text-xs text-stone-400">None retrieved</p>
-                )}
-              </section>
-
-              <section className="space-y-2">
-                <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
-                  <Wrench className="size-3.5" />
-                  Tools
-                </p>
-                {trace.tool_calls?.length ? (
-                  <div className="flex flex-col gap-1.5">
-                    {trace.tool_calls.map((tool, index) => (
-                      <p
-                        key={`${tool.name}-${index}`}
-                        className="font-mono text-[11px] text-stone-500"
-                      >
-                        {tool.name}
-                        <span className="text-stone-400">
-                          {" "}
-                          · {tool.status} · {tool.duration_ms} ms
-                        </span>
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-stone-400">No tools called</p>
                 )}
               </section>
 

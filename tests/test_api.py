@@ -24,9 +24,19 @@ def test_chat_returns_contract_and_trace(client: TestClient) -> None:
     assert body["citations"][0]["document_id"] == "HR-LEAVE-001"
     assert body["citations"][0]["excerpt"]
     assert "HR-LEAVE-001" in body["retrieved_document_ids"]
+    assert any(item["document_id"] == "HR-LEAVE-001" for item in body["retrieved_documents"])
     assert any(
-        item["document_id"] == "HR-LEAVE-001" and item.get("excerpt")
+        item["document_id"] == "HR-LEAVE-001" and item.get("section")
         for item in body["retrieved_documents"]
+    )
+    assert body["agent_model"]
+    assert body["embedding_model"]
+    assert body["model_mode"]
+    assert body["turn_count"] >= 1
+    assert any(step["kind"] == "model" for step in body["steps"])
+    assert any(
+        step["kind"] == "tool" and step["name"] == "search_hr_policy"
+        for step in body["steps"]
     )
 
 
