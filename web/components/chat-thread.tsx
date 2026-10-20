@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/auth-provider";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -276,7 +277,10 @@ export function ChatThread() {
                         : "rounded-[1.35rem] rounded-bl-md border border-stone-200/80 bg-white/90 text-stone-800",
                     )}
                   >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    <ChatMarkdown
+                      content={message.content}
+                      tone={isUser ? "user" : "assistant"}
+                    />
                     {message.response ? (
                       <AssistantExtras
                         response={message.response}
