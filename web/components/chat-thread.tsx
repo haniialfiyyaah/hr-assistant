@@ -107,6 +107,15 @@ export function ChatThread() {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef(messages);
+  const conversationIdRef = useRef(conversationId);
+  const sendingRef = useRef(sending);
+  const hydratingRef = useRef(hydrating);
+
+  messagesRef.current = messages;
+  conversationIdRef.current = conversationId;
+  sendingRef.current = sending;
+  hydratingRef.current = hydrating;
 
   useEffect(() => {
     if (!user) {
@@ -120,7 +129,8 @@ export function ChatThread() {
     setHydrating(true);
     apiRequest<ConversationPayload>("GET", API_PATHS.currentConversation, token)
       .then((payload) => {
-        if (cancelled) {
+        // Do not wipe an in-flight "confirm" bubble with a stale server snapshot.
+        if (cancelled || sendingRef.current) {
           return;
         }
         const next = payload.messages.map(toThreadMessage);
@@ -156,7 +166,9 @@ export function ChatThread() {
 
   const session = user;
 
-  function persist(next: ThreadMessage[], nextConversationId: string | null = conversationId) {
+  function persist(next: ThreadMessage[], nextConversationId: string | null) {
+    messagesRef.current = next;
+    conversationIdRef.current = nextConversationId;
     setMessages(next);
     setConversationId(nextConversationId);
     writeThread(session.employeeId, next);
@@ -165,18 +177,20 @@ export function ChatThread() {
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || sending || hydrating) {
+    if (!trimmed || sendingRef.current || hydratingRef.current) {
       return;
     }
+    const activeConversationId = conversationIdRef.current;
     const userMessage: ThreadMessage = {
       id: newId(),
       role: "user",
       content: trimmed,
       createdAt: new Date().toISOString(),
     };
-    const withUser = [...messages, userMessage];
-    persist(withUser);
+    const withUser = [...messagesRef.current, userMessage];
+    persist(withUser, activeConversationId);
     setDraft("");
+    sendingRef.current = true;
     setSending(true);
     try {
       const result = await apiRequest<ChatResponsePayload>(
@@ -185,7 +199,9 @@ export function ChatThread() {
         session.demoToken,
         {
           message: trimmed,
-          ...(conversationId ? { conversation_id: conversationId } : {}),
+          ...(activeConversationId
+            ? { conversation_id: activeConversationId }
+            : {}),
         },
       );
       const assistantMessage: ThreadMessage = {
@@ -195,7 +211,10 @@ export function ChatThread() {
         createdAt: new Date().toISOString(),
         response: result,
       };
-      persist([...withUser, assistantMessage], result.conversation_id ?? conversationId);
+      persist(
+        [...withUser, assistantMessage],
+        result.conversation_id ?? activeConversationId,
+      );
     } catch (error) {
       const detail =
         error instanceof ApiError
@@ -210,8 +229,9 @@ export function ChatThread() {
         content: `Could not complete that request: ${detail}`,
         createdAt: new Date().toISOString(),
       };
-      persist([...withUser, assistantMessage], conversationId);
+      persist([...withUser, assistantMessage], activeConversationId);
     } finally {
+      sendingRef.current = false;
       setSending(false);
       composerRef.current?.focus();
     }
@@ -557,10 +577,15 @@ function AssistantExtras({
           ) : null}
           <div className="px-4 pb-4">
             <Button
+              type="button"
               className="w-full rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.98] sm:w-auto"
               size="sm"
               disabled={confirming}
-              onClick={onConfirm}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onConfirm();
+              }}
             >
               {confirming ? (
                 <LoaderCircle className="animate-spin" data-icon="inline-start" />
