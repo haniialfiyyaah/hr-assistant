@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     app_name: str = "HR Policy and Leave Assistant"
     environment: str = "development"
     database_url: str = "postgresql://hr_app:hr_app@postgres:5432/hr_assistant"
-    redis_url: str = "redis://redis:6379/0"
+    # Omit REDIS_URL on Vercel (v1); Compose / local .env should set it when Redis is up.
+    redis_url: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     agent_model: str = ""
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     @field_validator(
         "openai_api_key",
         "openai_base_url",
+        "redis_url",
         "input_cost_per_1m",
         "output_cost_per_1m",
         mode="before",

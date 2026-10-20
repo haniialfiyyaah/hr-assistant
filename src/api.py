@@ -44,7 +44,11 @@ def build_runtime(settings: Settings) -> dict[str, Any]:
         repository = PostgresRepository(
             settings.database_url, settings.embedding_dimensions
         )
-        cache = ResilientCache(settings.redis_url)
+        cache = (
+            ResilientCache(settings.redis_url)
+            if settings.redis_url
+            else NullCache()
+        )
         provider = OpenAIProvider(
             api_key=settings.openai_api_key or "",
             agent_model=settings.agent_model,

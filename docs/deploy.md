@@ -1,11 +1,13 @@
-# Deploy: Neon + Vercel
+# Deploy: Neon + Vercel (UI + API)
 
 Production shape for this repo:
 
 - **Neon** — Postgres + pgvector (`DATABASE_URL`)
-- **Vercel** — Next.js UI (`web/`)
-- **API** — FastAPI must be reachable at a public HTTPS URL (`API_URL` on the UI project). You can host the API on Vercel (Python) or another long-timeout host; see [API hosting](#api-hosting) below.
-- **Redis** — skipped for v1 (retrieval cache degrades; `/readyz` may show `cache: degraded`)
+- **Vercel (UI)** — Next.js under `web/`
+- **Vercel (API)** — FastAPI via `src/main.py` (second project, same Git repo)
+- **Redis** — skipped for v1 (omit `REDIS_URL`; cache uses `NullCache`)
+
+You need **two Vercel projects** from the same repository.
 
 ## 1. Neon
 
@@ -23,78 +25,83 @@ Production shape for this repo:
 
    Prefer Neon’s **direct** (or documented non-pooler) URL if you see pooler/idle connection issues with `psycopg_pool`.
 
-## 2. Next.js UI on Vercel
+## 2. FastAPI on Vercel (API project)
 
-1. Push this repo to GitHub (`haniialfiyyaah/hr-assistant`).
-2. [Vercel](https://vercel.com) → **Add New** → **Project** → import the repo.
-3. Set **Root Directory** to `web`.
-4. Framework preset: **Next.js**. Install / build use Yarn (`yarn install`, `yarn build`) — `packageManager` is set in `web/package.json`.
-5. Environment variables for the UI project:
+1. Push this repo to GitHub.
+2. [Vercel](https://vercel.com) → **Add New** → **Project** → import the **same** repo.
+3. Settings for this project:
+   - **Root Directory:** leave empty / `.` (repo root — not `web`)
+   - Framework: **FastAPI** (or auto-detect from `requirements.txt` + `src/main.py`)
+4. Entrypoint is already wired:
+   - [`src/main.py`](../src/main.py) exports `app = create_app()`
+   - [`pyproject.toml`](../pyproject.toml) has `[tool.vercel] entrypoint = "src.main:app"`
+   - [`vercel.json`](../vercel.json) sets `maxDuration: 300` for chat-length agent turns
+5. Environment variables (Production + Preview as needed):
+
+   | Key | Notes |
+   | --- | --- |
+   | `DATABASE_URL` | Neon URL with `sslmode=require` |
+   | `OPENAI_API_KEY` | Live key |
+   | `AGENT_MODEL` | Same as local `.env` |
+   | `EMBEDDING_MODEL` | Same as local `.env` |
+   | `OPENAI_BASE_URL` | Usually `https://api.openai.com/v1` |
+   | `MODEL_MODE` | `live` |
+   | `EMBEDDING_DIMENSIONS` | e.g. `1536` |
+   | `POLICY_INDEX_VERSION` | e.g. `policies-2026-01` |
+   | `REDIS_URL` | **omit** for v1 |
+
+6. Deploy. Note the API URL (e.g. `https://hr-assistant-api.vercel.app`).
+7. Smoke:
+
+   ```bash
+   curl -sS https://<api-host>/healthz
+   curl -sS https://<api-host>/readyz
+   ```
+
+`readyz` should show database/index ok; `cache` may be `degraded` without Redis.
+
+Local / Docker unchanged: `uvicorn src.api:create_app --factory` and the existing [`Dockerfile`](../Dockerfile).
+
+## 3. Next.js UI on Vercel (UI project)
+
+1. **Add New** → **Project** → import the **same** repo again (second project).
+2. Set **Root Directory** to `web`.
+3. Framework preset: **Next.js**. Install / build use Yarn (`yarn install`, `yarn build`).
+4. Environment variables:
 
    | Key | Value |
    | --- | --- |
-   | `API_URL` | Public HTTPS origin of the FastAPI service, **no trailing slash** (e.g. `https://hr-api.example.com`) |
+   | `API_URL` | Public HTTPS origin of the **API** Vercel project, **no trailing slash** |
 
-   Optional: `DATA_DIR` — defaults to `../data` from `web/` (available in the Vercel git checkout when Root Directory is `web`).
-6. Deploy. Open the UI URL → sign in as `alya@demo.local` / `demo`.
+   Optional: `DATA_DIR` — defaults to `../data` from `web/` in the git checkout.
+5. Deploy. Open the UI URL → sign in as `alya@demo.local` / `demo`.
 
-The browser calls same-origin `/api/v1/*`. Next rewrites those requests to `API_URL` (see `web/next.config.ts`).
+The browser calls same-origin `/api/v1/*`. Next rewrites those to `API_URL` (see `web/next.config.ts`).
 
 ### Local preview of production UI
 
 ```bash
 cd web
 yarn install
-API_URL=https://<your-api-host> yarn build
-API_URL=https://<your-api-host> yarn start
+API_URL=https://<your-api-vercel-host> yarn build
+API_URL=https://<your-api-vercel-host> yarn start
 ```
-
-## 3. API hosting
-
-Chat uses a bounded OpenAI tool loop and can take tens of seconds. Prefer a host with **request timeouts ≥ 60s** for `POST /api/v1/chat`.
-
-**Option A — Vercel (Python FastAPI)**  
-If you already run FastAPI on Vercel, point the UI’s `API_URL` at that deployment. Confirm the plan’s max duration covers agent chat (Hobby limits are often too short for multi-tool turns).
-
-**Option B — Container / VM (Railway, Fly.io, etc.)**  
-Deploy the existing [`Dockerfile`](../Dockerfile) + [`scripts/start-api.sh`](../scripts/start-api.sh) with Neon `DATABASE_URL` and OpenAI secrets. Set the UI `API_URL` to that service’s HTTPS URL.
-
-API env (either option):
-
-| Key | Notes |
-| --- | --- |
-| `DATABASE_URL` | Neon URL with `sslmode=require` |
-| `OPENAI_API_KEY` | Live key |
-| `AGENT_MODEL` | Same as local `.env` |
-| `EMBEDDING_MODEL` | Same as local `.env` |
-| `OPENAI_BASE_URL` | Usually `https://api.openai.com/v1` |
-| `MODEL_MODE` | `live` |
-| `EMBEDDING_DIMENSIONS` | e.g. `1536` |
-| `POLICY_INDEX_VERSION` | e.g. `policies-2026-01` |
-| `REDIS_URL` | omit for v1 |
 
 ## 4. Seed once
 
-Against the live API environment (shell on the API host, or locally with production `DATABASE_URL`):
+Against Neon (local machine with production `DATABASE_URL` in the environment):
 
 ```bash
 python -m src.setup_lab --reset
 ```
 
-Needs a working `OPENAI_API_KEY` + `EMBEDDING_MODEL` so policy chunks get real embeddings. Re-run only when you intentionally reset demo data.
+Needs a working `OPENAI_API_KEY` + `EMBEDDING_MODEL` so policy chunks get real embeddings. Re-run only when you intentionally reset demo data. Vercel does not run seed on deploy.
 
-## 5. Smoke checks
+## 5. End-to-end check
 
-```bash
-curl -sS https://<api-host>/healthz
-curl -sS https://<api-host>/readyz
-```
+Open the UI Vercel URL → `alya@demo.local` / `demo` → ask a question from [demo-questions.md](demo-questions.md).
 
-Expect `readyz` → database/index ok; `cache` may be `degraded` without Redis.
-
-Open the Vercel UI → `alya@demo.local` / `demo` → ask a question from [demo-questions.md](demo-questions.md).
-
-Optional API-only check (Swagger): `https://<api-host>/docs` with bearer `token-alya`.
+Optional API-only check: `https://<api-host>/docs` with bearer `token-alya`.
 
 ## Local vs production env
 
@@ -102,7 +109,12 @@ Optional API-only check (Swagger): `https://<api-host>/docs` with bearer `token-
 | --- | --- | --- |
 | `DATABASE_URL` | local Postgres | Neon |
 | `REDIS_URL` | local Redis | omit |
-| `API_URL` | `http://localhost:8000` (Next rewrite default) | Public API HTTPS origin |
-| OpenAI models | `.env` | API host secrets |
+| `API_URL` | `http://localhost:8000` (Next rewrite default) | API Vercel HTTPS origin |
+| OpenAI models | `.env` | API project secrets |
 
 Never commit `.env` or real secrets.
+
+## Notes
+
+- Chat can take tens of seconds; `maxDuration` is 300s on the API function. If turns still time out on Hobby, shorten agent settings or use a plan that allows longer runs.
+- Do not point both projects at Root Directory `web` — the API project must use the repo root.

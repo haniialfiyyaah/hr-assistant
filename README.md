@@ -89,7 +89,7 @@ Signing out and signing in as another demo user clears the previous chat. Identi
 
 ## Deploy (Neon + Vercel)
 
-Production: **Neon** (Postgres/pgvector) + **Vercel** (Next.js UI under `web/`). Point the UI’s `API_URL` at your FastAPI HTTPS origin (Vercel Python or another long-timeout host). Redis is optional and skipped for v1.
+Production: **Neon** (Postgres/pgvector) + **two Vercel projects** from this repo — FastAPI at repo root (`src/main.py`) and Next.js UI under `web/`. Set the UI project’s `API_URL` to the API project URL. Redis is optional and skipped for v1.
 
 See [Deploy guide](docs/deploy.md).
 
