@@ -204,6 +204,47 @@ def test_short_leave_follow_up_keeps_thread_context(
     assert "I do not have enough policy evidence" not in second.answer
 
 
+def test_policy_then_identity_does_not_force_leave_clarify(
+    repository: MemoryRepository,
+) -> None:
+    auth = AuthContext(employee_id="EMP-001", display_name="Alya")
+    agent = service(repository, LeaveSilentProvider())
+    first = agent.run(
+        ChatRequest(message="How many annual leave days do permanent employees get?"),
+        auth,
+    )
+    second = agent.run(
+        ChatRequest(
+            message="What employee am I",
+            conversation_id=first.conversation_id,
+        ),
+        auth,
+    )
+    assert "Which type do you need" not in second.answer
+
+
+def test_drip_feed_leave_details_stay_in_intake(
+    repository: MemoryRepository,
+) -> None:
+    auth = AuthContext(employee_id="EMP-001", display_name="Alya")
+    agent = service(repository, LeaveSilentProvider())
+    first = agent.run(
+        ChatRequest(message="I want to take leave at 24 october"),
+        auth,
+    )
+    second = agent.run(
+        ChatRequest(message="No, maybe 22", conversation_id=first.conversation_id),
+        auth,
+    )
+    third = agent.run(
+        ChatRequest(message="annual leave", conversation_id=first.conversation_id),
+        auth,
+    )
+    assert "I do not have enough policy evidence" not in third.answer
+    assert second.outcome == "answered"
+    assert third.outcome == "answered"
+
+
 def test_failed_prepare_forces_abstention(repository: MemoryRepository) -> None:
     response = service(repository, FailedPrepareProvider()).run(
         ChatRequest(message="Ajukan cuti tahunan 2025-01-02"),

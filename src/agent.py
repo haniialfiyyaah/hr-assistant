@@ -144,24 +144,46 @@ def signed_in_balance_answer(display_name: str, balances: list[dict[str, Any]]) 
     )
 
 
-def conversation_text(history: list[dict[str, Any]], message: str) -> str:
-    """Join prior turns with the new message so short follow-ups keep leave context."""
-    parts = [str(item.get("content", "")) for item in history]
-    parts.append(message)
-    return "\n".join(parts)
-
-
-def is_leave_request_intent(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> bool:
-    """True when this thread is a leave request, including short follow-ups like '2 days'."""
-    text = conversation_text(history or [], message).casefold()
+def message_is_leave_request(message: str) -> bool:
+    """True when this single user turn is asking to prepare/book leave."""
+    text = message.casefold()
     has_leave = any(word in text for word in _LEAVE_WORDS)
     if not has_leave:
         return False
     has_request = any(word in text for word in _LEAVE_REQUEST_CUES)
     has_relative = any(word in text for word in _RELATIVE_DATE_WORDS)
     return has_request or has_relative
+
+
+def leave_intake_still_open(history: list[dict[str, Any]]) -> bool:
+    """True after a leave request until a leave proposal is saved.
+
+    Users often drip details across turns ("24 Oct" → "maybe 22" → "annual").
+    The assistant may acknowledge without asking a question each time, so we
+    keep intake open until prepare_leave_request produces a proposal_id — not
+    only while the last assistant message ends with "?".
+    """
+    last_leave_at: int | None = None
+    for index, item in enumerate(history):
+        if item.get("role") != "user":
+            continue
+        if message_is_leave_request(str(item.get("content", ""))):
+            last_leave_at = index
+    if last_leave_at is None:
+        return False
+    for item in history[last_leave_at + 1 :]:
+        if item.get("role") == "assistant" and item.get("proposal_id"):
+            return False
+    return True
+
+
+def is_leave_request_intent(
+    message: str, history: list[dict[str, Any]] | None = None
+) -> bool:
+    """True for a leave request, or while an unfinished leave request is open."""
+    if message_is_leave_request(message):
+        return True
+    return leave_intake_still_open(history or [])
 
 
 def is_clarifying_question(answer: str) -> bool:
