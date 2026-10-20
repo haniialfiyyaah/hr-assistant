@@ -37,12 +37,17 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-  streamlit:
-    build: .
-    command: ["streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        API_URL: http://api:8000
     environment:
       API_URL: http://api:8000
-    ports: ["${STREAMLIT_PORT:-8501}:8501"]
+      DATA_DIR: /data
+      PORT: "3000"
+    ports: ["${WEB_PORT:-3000}:3000"]
     depends_on: [api]
 volumes:
   postgres_data:

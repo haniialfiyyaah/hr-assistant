@@ -10,7 +10,7 @@ This repository is a portfolio product (API, agent, retrieval, UI, tests, Docker
 - Bounded tool-calling agent with citation validation and abstention
 - Identity from bearer token only (`get_my_leave_balance` has no employee id argument)
 - Confirm → `pending_manager_review` with idempotent replay
-- Streamlit demo UI (Conversation / My leave requests / Monitoring)
+- Next.js demo UI (sign-in, dashboard, chat thread, leave, people, policies, monitoring)
 - Offline tests, overlap regression, and a 15-case live evaluation runner
 
 ## Quick start (local)
@@ -28,10 +28,12 @@ python -m src.setup_lab --reset
 
 uvicorn src.api:create_app --factory --host 127.0.0.1 --port 8000
 # other terminal:
-streamlit run app.py
+cd web && yarn install && yarn dev
 ```
 
-UI: http://localhost:8501 · API: http://localhost:8000
+UI: http://localhost:3000 · API: http://localhost:8000
+
+Demo sign-in (password `demo` for all): `alya@demo.local`, `bima@demo.local`, `admin@demo.local`. Chat history is browser-only; each send still posts a single message to the API.
 
 ## Tests and evaluation
 
@@ -45,15 +47,35 @@ Reports are written under `outputs/` (gitignored JSON/MD artifacts).
 
 ## Docker image
 
+One command (build, Postgres/Redis, seed, API, Next UI):
+
 ```bash
-COMPOSE_PROJECT_NAME=hr_assistant docker-compose build api streamlit
+./scripts/compose-up.sh
+```
+
+Or step by step:
+
+```bash
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose build api web
 COMPOSE_PROJECT_NAME=hr_assistant docker-compose up -d postgres redis
 COMPOSE_PROJECT_NAME=hr_assistant docker-compose run --rm api python -m src.setup_lab
-COMPOSE_PROJECT_NAME=hr_assistant docker-compose up -d api streamlit
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose up -d api web
 COMPOSE_PROJECT_NAME=hr_assistant docker-compose run --rm api python -m pytest -m "not live"
 ```
 
-Build does not require an API key. Runtime reads credentials from `.env`. The image runs as a non-root user.
+UI http://localhost:3000 · API http://localhost:8000 · stop with `COMPOSE_PROJECT_NAME=hr_assistant docker-compose down`.
+
+Lighter local option (Postgres, Redis, and API in Docker; Next UI on the host — skips building the web image):
+
+```bash
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose up -d postgres redis
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose build api
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose run --rm api python -m src.setup_lab
+COMPOSE_PROJECT_NAME=hr_assistant docker-compose up -d api
+cd web && yarn install && yarn dev
+```
+
+Build does not require an API key. Runtime reads credentials from `.env`. The API image runs as a non-root user. The UI image is the Next.js app under `web/`.
 
 ## Demo personas
 
@@ -63,18 +85,18 @@ Build does not require an API key. Runtime reads credentials from `.env`. The im
 | Bima (employee) | EMP-002 | `token-bima` |
 | Monitoring admin | ADM-001 | `token-admin` |
 
-Switching persona in the UI clears the previous chat. Identity is enforced on the server.
+Signing out and signing in as another demo user clears the previous chat. Identity is enforced on the server.
 
-## Deploy (Neon + Render)
+## Deploy (Neon + Vercel)
 
-Production: **Neon** (Postgres/pgvector) + **Render Free** (API + Streamlit from this repo). Redis is optional and skipped on first deploy.
+Production: **Neon** (Postgres/pgvector) + **Vercel** (Next.js UI under `web/`). Point the UI’s `API_URL` at your FastAPI HTTPS origin (Vercel Python or another long-timeout host). Redis is optional and skipped for v1.
 
-See [Deploy guide](docs/deploy.md) and [`render.yaml`](render.yaml) (Blueprint → git-push-to-deploy).
+See [Deploy guide](docs/deploy.md).
 
 ## Docs
 
 - [Project guide — flows and details](docs/project-guide.md) (start here to learn the system)
-- [Deploy — Neon + Render](docs/deploy.md)
+- [Deploy — Neon + Vercel](docs/deploy.md)
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
 - [Demo script](docs/demo.md)

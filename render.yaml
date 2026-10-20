@@ -1,51 +1,5 @@
-# Render Blueprint: Neon Postgres externally; Redis skipped (cache degrades).
-# Dashboard → New → Blueprint → select this repo. Set sync:false secrets when prompted.
-# Docs: docs/deploy.md
+# DEPRECATED — production UI is on Vercel (see docs/deploy.md).
+# Kept only so an old Render Blueprint does not surprise-delete if still linked.
+# Do not create new Render services from this file.
 
-services:
-  - type: web
-    name: hr-assistant-api
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    # Invoke via sh + absolute path (avoids shebang/CRLF and cwd issues).
-    dockerCommand: sh /app/scripts/start-api.sh
-    healthCheckPath: /healthz
-
-
-    envVars:
-      - key: MODEL_MODE
-        value: live
-      - key: POLICY_INDEX_VERSION
-        value: policies-2026-01
-      - key: EMBEDDING_DIMENSIONS
-        value: "1536"
-      - key: OPENAI_BASE_URL
-        value: https://api.openai.com/v1
-      - key: DATABASE_URL
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: AGENT_MODEL
-        sync: false
-      - key: EMBEDDING_MODEL
-        sync: false
-      # Intentionally omit REDIS_URL — ResilientCache degrades to miss.
-
-  - type: web
-    name: hr-assistant-ui
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: sh /app/scripts/start-ui.sh
-
-
-    envVars:
-      # Public HTTPS URL of the API service (Render built-in).
-      - key: API_URL
-        fromService:
-          name: hr-assistant-api
-          type: web
-          envVarKey: RENDER_EXTERNAL_URL
+services: []
