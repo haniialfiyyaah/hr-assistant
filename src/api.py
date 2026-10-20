@@ -21,6 +21,7 @@ from .contracts import (
     ChatRequest,
     ChatResponse,
     ConfirmActionRequest,
+    ConversationSummary,
     ConversationView,
     LeaveRequestView,
     ProblemDetail,
@@ -197,6 +198,27 @@ def create_app(
     @app.get("/api/v1/conversations/current", response_model=ConversationView)
     def current_conversation(auth: AuthContext = Depends(require_auth)) -> ConversationView:
         conversation_id = repository.current_conversation_id(auth.employee_id)
+        return conversation_view(auth.employee_id, conversation_id)
+
+    @app.get("/api/v1/conversations", response_model=list[ConversationSummary])
+    def list_conversations(auth: AuthContext = Depends(require_auth)) -> list[ConversationSummary]:
+        rows = repository.list_conversations(auth.employee_id)
+        return [
+            ConversationSummary(
+                conversation_id=str(row["conversation_id"]),
+                title=str(row["title"]),
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    @app.get("/api/v1/conversations/{conversation_id}", response_model=ConversationView)
+    def get_conversation(
+        conversation_id: str, auth: AuthContext = Depends(require_auth)
+    ) -> ConversationView:
+        owner = repository.conversation_owner(conversation_id)
+        if owner != auth.employee_id:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
         return conversation_view(auth.employee_id, conversation_id)
 
     @app.post("/api/v1/conversations", response_model=ConversationView)

@@ -5,12 +5,22 @@ export const API_PATHS = {
   chat: "/api/v1/chat",
   currentConversation: "/api/v1/conversations/current",
   conversations: "/api/v1/conversations",
+  conversation: (conversationId: string) =>
+    `/api/v1/conversations/${conversationId}`,
   confirm: (proposalId: string) =>
     `/api/v1/action-proposals/${proposalId}/confirm`,
   myRequests: "/api/v1/leave-requests/me",
   monitoringSummary: "/api/v1/monitoring/summary",
   monitoringAlerts: "/api/v1/monitoring/alerts",
 } as const;
+
+export const CONVERSATIONS_CHANGED_EVENT = "hr-conversations-changed";
+
+export function notifyConversationsChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CONVERSATIONS_CHANGED_EVENT));
+  }
+}
 
 const REQUEST_TIMEOUT_MS = 60_000;
 

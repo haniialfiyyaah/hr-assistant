@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUp,
   BookOpen,
@@ -17,7 +18,12 @@ import { ChatMarkdown } from "@/components/chat-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
+import {
+  apiRequest,
+  API_PATHS,
+  ApiError,
+  notifyConversationsChanged,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   readConversationId,
@@ -100,6 +106,9 @@ function outcomeTone(outcome: string): string {
 
 export function ChatThread() {
   const { user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedId = searchParams.get("c");
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -125,9 +134,12 @@ export function ChatThread() {
     const token = user.demoToken;
     let cancelled = false;
     setMessages(readThread(employeeId));
-    setConversationId(readConversationId(employeeId));
+    setConversationId(requestedId ?? readConversationId(employeeId));
     setHydrating(true);
-    apiRequest<ConversationPayload>("GET", API_PATHS.currentConversation, token)
+    const path = requestedId
+      ? API_PATHS.conversation(requestedId)
+      : API_PATHS.currentConversation;
+    apiRequest<ConversationPayload>("GET", path, token)
       .then((payload) => {
         // Do not wipe an in-flight "confirm" bubble with a stale server snapshot.
         if (cancelled || sendingRef.current) {
@@ -138,6 +150,9 @@ export function ChatThread() {
         setConversationId(payload.conversation_id);
         writeThread(employeeId, next);
         writeConversationId(employeeId, payload.conversation_id);
+        if (!requestedId && payload.conversation_id) {
+          router.replace(`/?c=${payload.conversation_id}`, { scroll: false });
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -154,7 +169,7 @@ export function ChatThread() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, requestedId, router]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -211,10 +226,12 @@ export function ChatThread() {
         createdAt: new Date().toISOString(),
         response: result,
       };
-      persist(
-        [...withUser, assistantMessage],
-        result.conversation_id ?? activeConversationId,
-      );
+      const nextConversationId = result.conversation_id ?? activeConversationId;
+      persist([...withUser, assistantMessage], nextConversationId);
+      notifyConversationsChanged();
+      if (nextConversationId && nextConversationId !== requestedId) {
+        router.replace(`/?c=${nextConversationId}`, { scroll: false });
+      }
     } catch (error) {
       const detail =
         error instanceof ApiError
@@ -253,6 +270,10 @@ export function ChatThread() {
       );
       persist([], created.conversation_id);
       setDraft("");
+      notifyConversationsChanged();
+      if (created.conversation_id) {
+        router.push(`/?c=${created.conversation_id}`);
+      }
       composerRef.current?.focus();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not start a new chat.");

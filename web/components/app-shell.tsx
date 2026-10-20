@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
+import { ConversationList } from "@/components/conversation-list";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -146,7 +147,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "hidden shrink-0 flex-col border-r border-stone-200/80 bg-white/70 text-stone-800 backdrop-blur-md transition-[width] duration-200 ease-out md:flex",
+          "hidden h-svh min-h-0 shrink-0 flex-col border-r border-stone-200/80 bg-white/70 text-stone-800 backdrop-blur-md transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-16" : "w-60",
         )}
       >
@@ -189,9 +190,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 p-2">
+        <nav className="flex flex-col gap-1 p-2">
           {renderNav({ collapsed })}
         </nav>
+
+        <Suspense fallback={null}>
+          <ConversationList collapsed={collapsed} />
+        </Suspense>
 
         <div className="border-t border-stone-200/80 p-2">
           {!collapsed ? (
@@ -224,7 +229,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="left"
-          className="w-[min(100%,20rem)] gap-0 bg-white/95 p-0 backdrop-blur-md"
+          className="flex h-full w-[min(100%,20rem)] flex-col gap-0 bg-white/95 p-0 backdrop-blur-md"
           showCloseButton
         >
           <SheetHeader className="border-b border-stone-200/80 pr-12">
@@ -242,9 +247,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           </SheetHeader>
-          <nav className="flex flex-1 flex-col gap-1 p-3">
+          <nav className="flex flex-col gap-1 p-3">
             {renderNav({ onNavigate: () => setMobileOpen(false) })}
           </nav>
+          <Suspense fallback={null}>
+            <ConversationList onNavigate={() => setMobileOpen(false)} />
+          </Suspense>
           <div className="mt-auto border-t border-stone-200/80 p-3">
             <div className="mb-2 rounded-xl bg-stone-50 px-3 py-2">
               <p className="truncate text-sm font-medium text-stone-800">

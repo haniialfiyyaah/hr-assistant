@@ -95,6 +95,14 @@ class ConversationView(BaseModel):
     messages: list[ThreadMessageView] = Field(default_factory=list)
 
 
+class ConversationSummary(BaseModel):
+    """Sidebar row for one saved chat."""
+
+    conversation_id: str
+    title: str
+    updated_at: datetime
+
+
 class ConfirmActionRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 

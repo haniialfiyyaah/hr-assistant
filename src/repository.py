@@ -42,6 +42,7 @@ class Repository(Protocol):
     def create_conversation(self, employee_id: str) -> str: ...
     def conversation_owner(self, conversation_id: str) -> str | None: ...
     def current_conversation_id(self, employee_id: str) -> str | None: ...
+    def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]: ...
     def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]: ...
     def append_message(
         self,
@@ -309,6 +310,32 @@ class MemoryRepository:
             return None
         owned.sort(key=lambda row: row["updated_at"], reverse=True)
         return str(owned[0]["conversation_id"])
+
+    def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 100))
+        owned = [
+            row
+            for row in self._conversations.values()
+            if row["employee_id"] == employee_id
+        ]
+        owned.sort(key=lambda row: row["updated_at"], reverse=True)
+        summaries: list[dict[str, Any]] = []
+        for row in owned[:safe_limit]:
+            title = "New chat"
+            for message in row["messages"]:
+                if message.get("role") == "user" and str(message.get("content") or "").strip():
+                    title = str(message["content"]).strip()
+                    break
+            if len(title) > 72:
+                title = f"{title[:69].rstrip()}..."
+            summaries.append(
+                {
+                    "conversation_id": row["conversation_id"],
+                    "title": title,
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return summaries
 
     def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]:
         row = self._conversations.get(conversation_id)
@@ -838,6 +865,45 @@ class PostgresRepository:
         if row is None:
             return None
         return str(row[0])
+
+    def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 100))
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        c.conversation_id,
+                        c.updated_at,
+                        (
+                            SELECT m.content
+                            FROM conversation_messages m
+                            WHERE m.conversation_id = c.conversation_id
+                              AND m.role = 'user'
+                            ORDER BY m.seq ASC
+                            LIMIT 1
+                        ) AS first_user_message
+                    FROM conversations c
+                    WHERE c.employee_id = %s
+                    ORDER BY c.updated_at DESC
+                    LIMIT %s
+                    """,
+                    (employee_id, safe_limit),
+                )
+                rows = cur.fetchall()
+        summaries: list[dict[str, Any]] = []
+        for row in rows:
+            title = str(row[2] or "").strip() or "New chat"
+            if len(title) > 72:
+                title = f"{title[:69].rstrip()}..."
+            summaries.append(
+                {
+                    "conversation_id": row[0],
+                    "title": title,
+                    "updated_at": row[1],
+                }
+            )
+        return summaries
 
     def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]:
         safe_limit = max(1, min(int(limit), 200))
