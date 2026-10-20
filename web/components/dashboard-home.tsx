@@ -93,7 +93,9 @@ export function DashboardHome() {
   const shortcuts =
     user.role === "monitoring_admin"
       ? SHORTCUTS
-      : SHORTCUTS.filter((item) => item.href !== "/monitoring");
+      : SHORTCUTS.filter(
+          (item) => item.href !== "/monitoring" && item.href !== "/people",
+        );
 
   return (
     <PageFrame

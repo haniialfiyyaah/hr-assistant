@@ -61,7 +61,7 @@ const NAV: {
     href: "/people",
     label: "People",
     icon: Users,
-    roles: ["employee", "monitoring_admin"],
+    roles: ["monitoring_admin"],
   },
   {
     href: "/policies",
