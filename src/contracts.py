@@ -86,6 +86,7 @@ class ThreadMessageView(BaseModel):
     created_at: datetime
     outcome: str | None = None
     action_proposal: ActionProposal | None = None
+    trace_id: str | None = None
 
 
 class ConversationView(BaseModel):

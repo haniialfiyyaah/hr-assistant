@@ -51,6 +51,7 @@ class Repository(Protocol):
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        trace_id: str | None = None,
     ) -> str: ...
 
 
@@ -357,6 +358,7 @@ class MemoryRepository:
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        trace_id: str | None = None,
     ) -> str:
         row = self._conversations.get(conversation_id)
         if row is None:
@@ -371,6 +373,7 @@ class MemoryRepository:
                 "content": content,
                 "outcome": outcome,
                 "proposal_id": proposal_id,
+                "trace_id": trace_id,
                 "created_at": now,
                 "seq": self._message_seq,
             }
@@ -919,9 +922,10 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT message_id, role, content, outcome, proposal_id, created_at
+                    SELECT message_id, role, content, outcome, proposal_id, trace_id, created_at
                     FROM (
-                        SELECT message_id, role, content, outcome, proposal_id, created_at, seq
+                        SELECT message_id, role, content, outcome, proposal_id, trace_id,
+                               created_at, seq
                         FROM conversation_messages
                         WHERE conversation_id = %s
                         ORDER BY seq DESC
@@ -939,7 +943,8 @@ class PostgresRepository:
                 "content": row[2],
                 "outcome": row[3],
                 "proposal_id": row[4],
-                "created_at": row[5],
+                "trace_id": row[5],
+                "created_at": row[6],
             }
             for row in rows
         ]
@@ -951,6 +956,7 @@ class PostgresRepository:
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        trace_id: str | None = None,
     ) -> str:
         message_id = f"MSG-{uuid.uuid4().hex[:12].upper()}"
         now = datetime.now(timezone.utc)
@@ -966,11 +972,20 @@ class PostgresRepository:
                     """
                     INSERT INTO conversation_messages (
                         message_id, conversation_id, role, content, outcome,
-                        proposal_id, created_at
+                        proposal_id, trace_id, created_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (message_id, conversation_id, role, content, outcome, proposal_id, now),
+                    (
+                        message_id,
+                        conversation_id,
+                        role,
+                        content,
+                        outcome,
+                        proposal_id,
+                        trace_id,
+                        now,
+                    ),
                 )
                 cur.execute(
                     """

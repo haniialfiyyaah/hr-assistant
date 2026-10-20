@@ -113,6 +113,11 @@ def test_other_employee_cannot_read_conversation(repository: MemoryRepository, s
     alya_current = client.get("/api/v1/conversations/current", headers=ALYA).json()
     assert alya_current["conversation_id"] == conversation_id
     assert alya_current["messages"][0]["content"] == MARKER
+    assistant = next(
+        item for item in alya_current["messages"] if item["role"] == "assistant"
+    )
+    assert assistant.get("trace_id")
+    assert assistant["trace_id"] == created["trace_id"]
 
 
 def test_new_conversation_becomes_current(client: TestClient) -> None:

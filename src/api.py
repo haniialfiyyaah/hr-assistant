@@ -1,4 +1,5 @@
 """FastAPI application: auth, chat, confirm, traces, and monitoring."""
+
 from __future__ import annotations
 
 import json
@@ -53,14 +54,8 @@ def build_runtime(settings: Settings) -> dict[str, Any]:
             raise RuntimeError(
                 "Live mode requires OPENAI_API_KEY, AGENT_MODEL, and EMBEDDING_MODEL."
             )
-        repository = PostgresRepository(
-            settings.database_url, settings.embedding_dimensions
-        )
-        cache = (
-            ResilientCache(settings.redis_url)
-            if settings.redis_url
-            else NullCache()
-        )
+        repository = PostgresRepository(settings.database_url, settings.embedding_dimensions)
+        cache = ResilientCache(settings.redis_url) if settings.redis_url else NullCache()
         provider = OpenAIProvider(
             api_key=settings.openai_api_key or "",
             agent_model=settings.agent_model,
@@ -70,13 +65,9 @@ def build_runtime(settings: Settings) -> dict[str, Any]:
             timeout_seconds=settings.model_timeout_seconds,
         )
 
-    retrieval = RetrievalService(
-        repository, provider, cache, settings.retrieval_cache_ttl_seconds
-    )
+    retrieval = RetrievalService(repository, provider, cache, settings.retrieval_cache_ttl_seconds)
     tools = ToolExecutor(repository, retrieval, settings, today_factory=today_in_jakarta)
-    agent = AgentService(
-        repository, provider, tools, settings, today_factory=today_in_jakarta
-    )
+    agent = AgentService(repository, provider, tools, settings, today_factory=today_in_jakarta)
     return {
         "repository": repository,
         "cache": cache,
@@ -107,9 +98,7 @@ def create_app(
     app.state.agent = agent
 
     @app.exception_handler(RequestValidationError)
-    async def validation_handler(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         problem = ProblemDetail(
             title="Validation Error",
             status=422,
@@ -125,7 +114,9 @@ def create_app(
             status=exc.status_code,
             detail=detail,
         )
-        return JSONResponse(status_code=exc.status_code, content={"detail": detail, **problem.model_dump()})
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": detail, **problem.model_dump()}
+        )
 
     def require_auth(
         authorization: str | None = Header(default=None),
@@ -190,6 +181,7 @@ def create_app(
                 created_at=row["created_at"],
                 outcome=row.get("outcome"),
                 action_proposal=visible_proposal(employee_id, row.get("proposal_id")),
+                trace_id=str(row["trace_id"]) if row.get("trace_id") else None,
             )
             for row in rows
         ]
@@ -243,9 +235,7 @@ def create_app(
         auth: AuthContext = Depends(require_auth),
     ) -> ActionResult:
         try:
-            return repository.confirm_proposal(
-                auth.employee_id, proposal_id, body.idempotency_key
-            )
+            return repository.confirm_proposal(auth.employee_id, proposal_id, body.idempotency_key)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Proposal not found.") from exc
         except ConflictError as exc:
@@ -258,9 +248,7 @@ def create_app(
         return repository.list_leave_requests(auth.employee_id)
 
     @app.get("/api/v1/traces/{trace_id}")
-    def get_trace(
-        trace_id: str, auth: AuthContext = Depends(require_auth)
-    ) -> dict[str, Any]:
+    def get_trace(trace_id: str, auth: AuthContext = Depends(require_auth)) -> dict[str, Any]:
         trace = repository.get_trace(trace_id)
         if trace is None:
             raise HTTPException(status_code=404, detail="Trace not found.")

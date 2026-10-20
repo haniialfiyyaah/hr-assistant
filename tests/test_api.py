@@ -19,7 +19,15 @@ def test_chat_returns_contract_and_trace(client: TestClient) -> None:
     assert payload["citations"][0]["document_id"] == "HR-LEAVE-001"
     trace = client.get(f"/api/v1/traces/{payload['trace_id']}", headers=AUTH)
     assert trace.status_code == 200
-    assert "message" not in trace.json()
+    body = trace.json()
+    assert "message" not in body
+    assert body["citations"][0]["document_id"] == "HR-LEAVE-001"
+    assert body["citations"][0]["excerpt"]
+    assert "HR-LEAVE-001" in body["retrieved_document_ids"]
+    assert any(
+        item["document_id"] == "HR-LEAVE-001" and item.get("excerpt")
+        for item in body["retrieved_documents"]
+    )
 
 
 def test_monitoring_is_admin_only(client: TestClient) -> None:

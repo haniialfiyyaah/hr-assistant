@@ -84,6 +84,7 @@ export interface ServerThreadMessage {
   created_at: string;
   outcome: string | null;
   action_proposal: ChatProposal | null;
+  trace_id?: string | null;
 }
 
 export interface ConversationPayload {

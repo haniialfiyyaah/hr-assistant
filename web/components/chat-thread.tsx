@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/components/auth-provider";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { TraceInspector } from "@/components/trace-inspector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,7 +71,9 @@ function formatTime(iso: string): string {
 }
 
 function toThreadMessage(message: ServerThreadMessage): ThreadMessage {
-  const hasExtras = Boolean(message.outcome || message.action_proposal);
+  const hasExtras = Boolean(
+    message.outcome || message.action_proposal || message.trace_id,
+  );
   return {
     id: message.message_id,
     role: message.role,
@@ -83,7 +86,7 @@ function toThreadMessage(message: ServerThreadMessage): ThreadMessage {
           citations: [],
           tool_calls: [],
           action_proposal: message.action_proposal,
-          trace_id: "",
+          trace_id: message.trace_id ?? "",
         }
       : undefined,
   };
@@ -152,7 +155,7 @@ export function ChatThread() {
       API_PATHS.conversation(requestedId),
       token,
     )
-      .then((payload) => {
+      .then(payload => {
         // Do not wipe an in-flight "confirm" bubble with a stale server snapshot.
         if (cancelled || sendingRef.current) {
           return;
@@ -363,7 +366,7 @@ export function ChatThread() {
                 </p>
               </div>
               <div className="flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
-                {EXAMPLES.map((example) => (
+                {EXAMPLES.map(example => (
                   <button
                     key={example.label}
                     type="button"
@@ -428,7 +431,8 @@ export function ChatThread() {
                     ) : null}
                   </div>
                   <p className="px-1 text-[11px] text-stone-400">
-                    {isUser ? "You" : "Assistant"} · {formatTime(message.createdAt)}
+                    {isUser ? "You" : "Assistant"} ·{" "}
+                    {formatTime(message.createdAt)}
                   </p>
                 </div>
                 {isUser ? (
@@ -461,7 +465,7 @@ export function ChatThread() {
       <div className="relative z-10 border-t border-stone-200/70 bg-white/75 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:px-6 sm:py-4">
         <form
           className="mx-auto w-full max-w-3xl"
-          onSubmit={(event) => {
+          onSubmit={event => {
             event.preventDefault();
             void sendMessage(draft);
           }}
@@ -470,11 +474,11 @@ export function ChatThread() {
             <Textarea
               ref={composerRef}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={event => setDraft(event.target.value)}
               placeholder="Message the HR assistant…"
               rows={2}
               className="min-h-[3.75rem] resize-none border-0 bg-transparent px-3 py-2 text-[15px] shadow-none focus-visible:ring-0 sm:min-h-[4.5rem]"
-              onKeyDown={(event) => {
+              onKeyDown={event => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void sendMessage(draft);
@@ -485,7 +489,9 @@ export function ChatThread() {
               <p className="hidden text-[11px] text-stone-400 sm:block">
                 Enter to send · Shift+Enter for a new line
               </p>
-              <p className="text-[11px] text-stone-400 sm:hidden">Enter to send</p>
+              <p className="text-[11px] text-stone-400 sm:hidden">
+                Enter to send
+              </p>
               <Button
                 type="submit"
                 size="sm"
@@ -493,7 +499,10 @@ export function ChatThread() {
                 className="shrink-0 rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.97]"
               >
                 {sending ? (
-                  <LoaderCircle className="animate-spin" data-icon="inline-start" />
+                  <LoaderCircle
+                    className="animate-spin"
+                    data-icon="inline-start"
+                  />
                 ) : (
                   <ArrowUp data-icon="inline-start" />
                 )}
@@ -516,6 +525,7 @@ function AssistantExtras({
   confirming: boolean;
   onConfirm: () => void;
 }) {
+  const [traceOpen, setTraceOpen] = useState(false);
   const proposal = response.action_proposal;
   return (
     <div className="mt-4 flex flex-col gap-3 border-t border-stone-200/80 pt-3 text-stone-800">
@@ -529,11 +539,27 @@ function AssistantExtras({
           {response.outcome.replaceAll("_", " ")}
         </span>
         {response.trace_id ? (
-          <Badge variant="outline" className="font-mono text-[10px]">
-            {response.trace_id}
-          </Badge>
+          <button
+            type="button"
+            onClick={() => setTraceOpen(true)}
+            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-teal-700/40"
+            title="Inspect agent trace"
+          >
+            <Badge
+              variant="outline"
+              className="cursor-pointer font-mono text-[10px] transition-colors hover:border-teal-800/30 hover:bg-teal-50"
+            >
+              {response.trace_id}
+            </Badge>
+          </button>
         ) : null}
       </div>
+
+      <TraceInspector
+        traceId={response.trace_id}
+        open={traceOpen}
+        onOpenChange={setTraceOpen}
+      />
 
       {response.citations?.length ? (
         <div className="flex flex-col gap-2">
@@ -597,7 +623,9 @@ function AssistantExtras({
               <p className="text-[11px] tracking-wide text-stone-500 uppercase">
                 Type
               </p>
-              <p className="mt-0.5 font-medium capitalize">{proposal.leave_type}</p>
+              <p className="mt-0.5 font-medium capitalize">
+                {proposal.leave_type}
+              </p>
             </div>
             <div>
               <p className="text-[11px] tracking-wide text-stone-500 uppercase">
@@ -625,14 +653,17 @@ function AssistantExtras({
               className="w-full rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.98] sm:w-auto"
               size="sm"
               disabled={confirming}
-              onClick={(event) => {
+              onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
                 onConfirm();
               }}
             >
               {confirming ? (
-                <LoaderCircle className="animate-spin" data-icon="inline-start" />
+                <LoaderCircle
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
               ) : (
                 <CheckCircle2 data-icon="inline-start" />
               )}

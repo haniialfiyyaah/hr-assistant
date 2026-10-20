@@ -12,6 +12,7 @@ export const API_PATHS = {
   myRequests: "/api/v1/leave-requests/me",
   monitoringSummary: "/api/v1/monitoring/summary",
   monitoringAlerts: "/api/v1/monitoring/alerts",
+  trace: (traceId: string) => `/api/v1/traces/${traceId}`,
 } as const;
 
 export const CONVERSATIONS_CHANGED_EVENT = "hr-conversations-changed";

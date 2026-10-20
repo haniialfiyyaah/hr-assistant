@@ -568,13 +568,25 @@ class AgentService:
             answer,
             outcome=outcome.value,
             proposal_id=proposal_id,
+            trace_id=trace_id,
         )
+        retrieved_documents = [
+            {
+                "document_id": document_id,
+                "title": str(item.get("title", document_id)),
+                "section": str(item.get("section", "")),
+                "excerpt": str(item.get("content", ""))[:280],
+            }
+            for document_id, item in sorted(retrieved_by_document.items())
+        ]
         self.repository.save_trace(
             {
                 "trace_id": trace_id,
                 "employee_id": auth.employee_id,
                 "outcome": outcome.value,
-                "retrieved_document_ids": sorted(retrieved_by_document),
+                "retrieved_document_ids": [item["document_id"] for item in retrieved_documents],
+                "retrieved_documents": retrieved_documents,
+                "citations": [item.model_dump() for item in citations],
                 "tool_calls": [item.model_dump() for item in tool_summaries],
                 "latency_ms": latency_ms,
                 "input_tokens": input_tokens,

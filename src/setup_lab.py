@@ -169,12 +169,21 @@ def _schema_sql(embedding_dimensions: int) -> str:
         content TEXT NOT NULL,
         outcome TEXT,
         proposal_id TEXT,
+        trace_id TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         seq BIGINT GENERATED ALWAYS AS IDENTITY
     );
 
     CREATE INDEX IF NOT EXISTS conversation_messages_lookup_idx
         ON conversation_messages (conversation_id, seq);
+    """
+
+
+def _migrate_sql() -> str:
+    """Additive fixes for labs that already created tables without reset."""
+    return """
+    ALTER TABLE conversation_messages
+        ADD COLUMN IF NOT EXISTS trace_id TEXT;
     """
 
 
@@ -240,6 +249,7 @@ def ensure_schema(conn, settings: Settings, *, reset: bool) -> None:
         if reset:
             cur.execute(_drop_schema_sql())
         cur.execute(_schema_sql(settings.embedding_dimensions))
+        cur.execute(_migrate_sql())
         # ivfflat needs analyze / optional rebuild after first inserts; ignore empty-index errors later.
 
 
