@@ -151,11 +151,37 @@ def _schema_sql(embedding_dimensions: int) -> str:
         payload JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+        conversation_id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL REFERENCES employees(employee_id),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS conversations_employee_updated_idx
+        ON conversations (employee_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS conversation_messages (
+        message_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        outcome TEXT,
+        proposal_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        seq BIGINT GENERATED ALWAYS AS IDENTITY
+    );
+
+    CREATE INDEX IF NOT EXISTS conversation_messages_lookup_idx
+        ON conversation_messages (conversation_id, seq);
     """
 
 
 def _drop_schema_sql() -> str:
     return """
+    DROP TABLE IF EXISTS conversation_messages CASCADE;
+    DROP TABLE IF EXISTS conversations CASCADE;
     DROP TABLE IF EXISTS traces CASCADE;
     DROP TABLE IF EXISTS policy_chunks CASCADE;
     DROP TABLE IF EXISTS hr_tickets CASCADE;

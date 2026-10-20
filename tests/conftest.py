@@ -57,8 +57,11 @@ def client(repository: MemoryRepository, settings: Settings) -> TestClient:
     provider = DeterministicProvider()
     cache = NullCache()
     retrieval = RetrievalService(repository, provider, cache, 0)
-    tools = ToolExecutor(repository, retrieval, settings, today_factory=lambda: date(2026, 9, 23))
-    agent = AgentService(repository, provider, tools, settings)
+    def frozen_today() -> date:
+        return date(2026, 9, 23)
+
+    tools = ToolExecutor(repository, retrieval, settings, today_factory=frozen_today)
+    agent = AgentService(repository, provider, tools, settings, today_factory=frozen_today)
     app = create_app(settings=settings, repository=repository, cache=cache, agent=agent)
     return TestClient(app)
 

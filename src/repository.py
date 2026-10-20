@@ -36,10 +36,26 @@ class Repository(Protocol):
     def save_trace(self, trace: dict[str, Any]) -> None: ...
     def get_trace(self, trace_id: str) -> dict[str, Any] | None: ...
     def monitoring_summary(self) -> dict[str, Any]: ...
+    def create_conversation(self, employee_id: str) -> str: ...
+    def conversation_owner(self, conversation_id: str) -> str | None: ...
+    def current_conversation_id(self, employee_id: str) -> str | None: ...
+    def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]: ...
+    def append_message(
+        self,
+        conversation_id: str,
+        role: Literal["user", "assistant"],
+        content: str,
+        outcome: str | None = None,
+        proposal_id: str | None = None,
+    ) -> str: ...
 
 
 class ConflictError(RuntimeError):
     pass
+
+
+class ConversationNotFound(LookupError):
+    """Missing conversation, or one owned by a different employee."""
 
 
 class MemoryRepository:
@@ -53,6 +69,8 @@ class MemoryRepository:
         self._requests: list[dict[str, Any]] = []
         self._tickets: list[dict[str, Any]] = []
         self._traces: dict[str, dict[str, Any]] = {}
+        self._conversations: dict[str, dict[str, Any]] = {}
+        self._message_seq = 0
         self._load_employees(employees_path or EMPLOYEES_PATH)
 
     def _load_employees(self, path: Path) -> None:
@@ -228,6 +246,71 @@ class MemoryRepository:
             "p95_latency_ms": p95,
             "tool_calls": tool_calls,
         }
+
+    def create_conversation(self, employee_id: str) -> str:
+        conversation_id = f"CV-{uuid.uuid4().hex[:12].upper()}"
+        now = datetime.now(timezone.utc)
+        self._conversations[conversation_id] = {
+            "conversation_id": conversation_id,
+            "employee_id": employee_id,
+            "created_at": now,
+            "updated_at": now,
+            "messages": [],
+        }
+        return conversation_id
+
+    def conversation_owner(self, conversation_id: str) -> str | None:
+        row = self._conversations.get(conversation_id)
+        if row is None:
+            return None
+        return str(row["employee_id"])
+
+    def current_conversation_id(self, employee_id: str) -> str | None:
+        owned = [
+            row
+            for row in self._conversations.values()
+            if row["employee_id"] == employee_id
+        ]
+        if not owned:
+            return None
+        owned.sort(key=lambda row: row["updated_at"], reverse=True)
+        return str(owned[0]["conversation_id"])
+
+    def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]:
+        row = self._conversations.get(conversation_id)
+        if row is None:
+            return []
+        safe_limit = max(1, min(int(limit), 200))
+        messages = list(row["messages"])[-safe_limit:]
+        return [dict(item) for item in messages]
+
+    def append_message(
+        self,
+        conversation_id: str,
+        role: Literal["user", "assistant"],
+        content: str,
+        outcome: str | None = None,
+        proposal_id: str | None = None,
+    ) -> str:
+        row = self._conversations.get(conversation_id)
+        if row is None:
+            raise ConversationNotFound(conversation_id)
+        self._message_seq += 1
+        message_id = f"MSG-{uuid.uuid4().hex[:12].upper()}"
+        now = datetime.now(timezone.utc)
+        row["messages"].append(
+            {
+                "message_id": message_id,
+                "role": role,
+                "content": content,
+                "outcome": outcome,
+                "proposal_id": proposal_id,
+                "created_at": now,
+                "seq": self._message_seq,
+            }
+        )
+        row["updated_at"] = now
+        return message_id
 
 
 def _vector_literal(embedding: list[float]) -> str:
@@ -623,4 +706,119 @@ class PostgresRepository:
             "p95_latency_ms": p95,
             "tool_calls": tool_calls,
         }
+
+    def create_conversation(self, employee_id: str) -> str:
+        conversation_id = f"CV-{uuid.uuid4().hex[:12].upper()}"
+        now = datetime.now(timezone.utc)
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO conversations (
+                        conversation_id, employee_id, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (conversation_id, employee_id, now, now),
+                )
+        return conversation_id
+
+    def conversation_owner(self, conversation_id: str) -> str | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT employee_id FROM conversations WHERE conversation_id = %s",
+                    (conversation_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def current_conversation_id(self, employee_id: str) -> str | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT conversation_id
+                    FROM conversations
+                    WHERE employee_id = %s
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (employee_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def list_messages(self, conversation_id: str, limit: int) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 200))
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT message_id, role, content, outcome, proposal_id, created_at
+                    FROM (
+                        SELECT message_id, role, content, outcome, proposal_id, created_at, seq
+                        FROM conversation_messages
+                        WHERE conversation_id = %s
+                        ORDER BY seq DESC
+                        LIMIT %s
+                    ) recent
+                    ORDER BY seq ASC
+                    """,
+                    (conversation_id, safe_limit),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "message_id": row[0],
+                "role": row[1],
+                "content": row[2],
+                "outcome": row[3],
+                "proposal_id": row[4],
+                "created_at": row[5],
+            }
+            for row in rows
+        ]
+
+    def append_message(
+        self,
+        conversation_id: str,
+        role: Literal["user", "assistant"],
+        content: str,
+        outcome: str | None = None,
+        proposal_id: str | None = None,
+    ) -> str:
+        message_id = f"MSG-{uuid.uuid4().hex[:12].upper()}"
+        now = datetime.now(timezone.utc)
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM conversations WHERE conversation_id = %s",
+                    (conversation_id,),
+                )
+                if cur.fetchone() is None:
+                    raise ConversationNotFound(conversation_id)
+                cur.execute(
+                    """
+                    INSERT INTO conversation_messages (
+                        message_id, conversation_id, role, content, outcome,
+                        proposal_id, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (message_id, conversation_id, role, content, outcome, proposal_id, now),
+                )
+                cur.execute(
+                    """
+                    UPDATE conversations
+                    SET updated_at = %s
+                    WHERE conversation_id = %s
+                    """,
+                    (now, conversation_id),
+                )
+        return message_id
 

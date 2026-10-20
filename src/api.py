@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,18 +12,28 @@ from fastapi.responses import JSONResponse
 
 from .agent import AgentService
 from .cache import NullCache, ResilientCache
+from .calendar import today_in_jakarta
 from .config import Settings, get_settings
 from .contracts import (
+    ActionProposal,
     ActionResult,
     AuthContext,
     ChatRequest,
     ChatResponse,
     ConfirmActionRequest,
+    ConversationView,
     LeaveRequestView,
     ProblemDetail,
+    ThreadMessageView,
 )
 from .providers import DeterministicProvider, OpenAIProvider
-from .repository import ConflictError, MemoryRepository, PostgresRepository, Repository
+from .repository import (
+    ConflictError,
+    ConversationNotFound,
+    MemoryRepository,
+    PostgresRepository,
+    Repository,
+)
 from .retrieval import RetrievalService
 from .tools import ToolExecutor
 
@@ -61,8 +72,10 @@ def build_runtime(settings: Settings) -> dict[str, Any]:
     retrieval = RetrievalService(
         repository, provider, cache, settings.retrieval_cache_ttl_seconds
     )
-    tools = ToolExecutor(repository, retrieval, settings)
-    agent = AgentService(repository, provider, tools, settings)
+    tools = ToolExecutor(repository, retrieval, settings, today_factory=today_in_jakarta)
+    agent = AgentService(
+        repository, provider, tools, settings, today_factory=today_in_jakarta
+    )
     return {
         "repository": repository,
         "cache": cache,
@@ -147,9 +160,54 @@ def create_app(
             "index": "ok" if index_ok else "empty",
         }
 
+    def visible_proposal(employee_id: str, proposal_id: str | None) -> ActionProposal | None:
+        """Return a proposal the employee can still confirm."""
+        if not proposal_id:
+            return None
+        found = repository.get_proposal(proposal_id)
+        if found is None or found[0] != employee_id:
+            return None
+        proposal = found[1]
+        expires_at = proposal.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            return None
+        return proposal
+
+    def conversation_view(employee_id: str, conversation_id: str | None) -> ConversationView:
+        if conversation_id is None:
+            return ConversationView()
+        rows = repository.list_messages(conversation_id, limit=100)
+        messages = [
+            ThreadMessageView(
+                message_id=str(row["message_id"]),
+                role=row["role"],
+                content=str(row["content"]),
+                created_at=row["created_at"],
+                outcome=row.get("outcome"),
+                action_proposal=visible_proposal(employee_id, row.get("proposal_id")),
+            )
+            for row in rows
+        ]
+        return ConversationView(conversation_id=conversation_id, messages=messages)
+
+    @app.get("/api/v1/conversations/current", response_model=ConversationView)
+    def current_conversation(auth: AuthContext = Depends(require_auth)) -> ConversationView:
+        conversation_id = repository.current_conversation_id(auth.employee_id)
+        return conversation_view(auth.employee_id, conversation_id)
+
+    @app.post("/api/v1/conversations", response_model=ConversationView)
+    def start_conversation(auth: AuthContext = Depends(require_auth)) -> ConversationView:
+        conversation_id = repository.create_conversation(auth.employee_id)
+        return ConversationView(conversation_id=conversation_id, messages=[])
+
     @app.post("/api/v1/chat", response_model=ChatResponse)
     def chat(body: ChatRequest, auth: AuthContext = Depends(require_auth)) -> ChatResponse:
-        return agent.run(body, auth)
+        try:
+            return agent.run(body, auth)
+        except ConversationNotFound as exc:
+            raise HTTPException(status_code=404, detail="Conversation not found.") from exc
 
     @app.post(
         "/api/v1/action-proposals/{proposal_id}/confirm",

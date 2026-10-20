@@ -74,6 +74,25 @@ class ChatResponse(BaseModel):
     action_proposal: ActionProposal | None = None
     trace_id: str
     usage: UsageSummary
+    conversation_id: str | None = None
+
+
+class ThreadMessageView(BaseModel):
+    """One stored turn. Tool payloads are not kept."""
+
+    message_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+    outcome: str | None = None
+    action_proposal: ActionProposal | None = None
+
+
+class ConversationView(BaseModel):
+    """The employee's latest thread, or an empty thread before the first message."""
+
+    conversation_id: str | None = None
+    messages: list[ThreadMessageView] = Field(default_factory=list)
 
 
 class ConfirmActionRequest(BaseModel):
