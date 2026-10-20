@@ -15,10 +15,17 @@ export const API_PATHS = {
 } as const;
 
 export const CONVERSATIONS_CHANGED_EVENT = "hr-conversations-changed";
+export const NEW_CHAT_EVENT = "hr-new-chat";
 
 export function notifyConversationsChanged(): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(CONVERSATIONS_CHANGED_EVENT));
+  }
+}
+
+export function notifyNewChat(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(NEW_CHAT_EVENT));
   }
 }
 

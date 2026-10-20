@@ -12,7 +12,7 @@ import {
   apiRequest,
   API_PATHS,
   CONVERSATIONS_CHANGED_EVENT,
-  notifyConversationsChanged,
+  notifyNewChat,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -49,7 +49,6 @@ export function ConversationList({
   const activeId = searchParams.get("c");
   const [items, setItems] = useState<ConversationSummaryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!user) {
@@ -85,28 +84,14 @@ export function ConversationList({
     };
   }, [refresh]);
 
-  async function startNewChat() {
-    if (!user || creating) {
+  function startNewChat() {
+    if (!user) {
       return;
     }
-    setCreating(true);
-    try {
-      const created = await apiRequest<{ conversation_id: string | null }>(
-        "POST",
-        API_PATHS.conversations,
-        user.demoToken,
-      );
-      notifyConversationsChanged();
-      onNavigate?.();
-      router.push(
-        created.conversation_id ? `/?c=${created.conversation_id}` : "/",
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Could not start a new chat.",
-      );
-    } finally {
-      setCreating(false);
+    onNavigate?.();
+    notifyNewChat();
+    if (pathname !== "/" || activeId) {
+      router.push("/");
     }
   }
 
@@ -122,10 +107,7 @@ export function ConversationList({
           variant="ghost"
           size="icon-sm"
           title="New chat"
-          disabled={creating}
-          onClick={() => {
-            void startNewChat();
-          }}
+          onClick={startNewChat}
           className="text-stone-600 hover:bg-stone-100 hover:text-stone-900"
         >
           <Plus />
@@ -144,10 +126,7 @@ export function ConversationList({
           type="button"
           variant="ghost"
           size="sm"
-          disabled={creating}
-          onClick={() => {
-            void startNewChat();
-          }}
+          onClick={startNewChat}
           className="h-7 rounded-full px-2 text-xs text-stone-600 hover:bg-stone-100 hover:text-stone-900"
         >
           <MessageSquarePlus data-icon="inline-start" />
@@ -163,9 +142,7 @@ export function ConversationList({
         ) : null}
         {items.map((item) => {
           const href = `/?c=${item.conversation_id}`;
-          const active =
-            activeId === item.conversation_id ||
-            (!activeId && pathname === "/" && items[0]?.conversation_id === item.conversation_id);
+          const active = activeId === item.conversation_id;
           return (
             <Link
               key={item.conversation_id}

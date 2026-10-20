@@ -312,6 +312,7 @@ class MemoryRepository:
         return str(owned[0]["conversation_id"])
 
     def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Return recent threads that already have a user message (skip empty drafts)."""
         safe_limit = max(1, min(int(limit), 100))
         owned = [
             row
@@ -320,12 +321,16 @@ class MemoryRepository:
         ]
         owned.sort(key=lambda row: row["updated_at"], reverse=True)
         summaries: list[dict[str, Any]] = []
-        for row in owned[:safe_limit]:
-            title = "New chat"
+        for row in owned:
+            if len(summaries) >= safe_limit:
+                break
+            title: str | None = None
             for message in row["messages"]:
                 if message.get("role") == "user" and str(message.get("content") or "").strip():
                     title = str(message["content"]).strip()
                     break
+            if title is None:
+                continue
             if len(title) > 72:
                 title = f"{title[:69].rstrip()}..."
             summaries.append(
@@ -867,6 +872,7 @@ class PostgresRepository:
         return str(row[0])
 
     def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Return recent threads that already have a user message (skip empty drafts)."""
         safe_limit = max(1, min(int(limit), 100))
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
@@ -875,15 +881,17 @@ class PostgresRepository:
                     SELECT
                         c.conversation_id,
                         c.updated_at,
-                        (
-                            SELECT m.content
-                            FROM conversation_messages m
-                            WHERE m.conversation_id = c.conversation_id
-                              AND m.role = 'user'
-                            ORDER BY m.seq ASC
-                            LIMIT 1
-                        ) AS first_user_message
+                        first_msg.content AS first_user_message
                     FROM conversations c
+                    INNER JOIN LATERAL (
+                        SELECT m.content
+                        FROM conversation_messages m
+                        WHERE m.conversation_id = c.conversation_id
+                          AND m.role = 'user'
+                          AND btrim(m.content) <> ''
+                        ORDER BY m.seq ASC
+                        LIMIT 1
+                    ) first_msg ON true
                     WHERE c.employee_id = %s
                     ORDER BY c.updated_at DESC
                     LIMIT %s
@@ -893,7 +901,7 @@ class PostgresRepository:
                 rows = cur.fetchall()
         summaries: list[dict[str, Any]] = []
         for row in rows:
-            title = str(row[2] or "").strip() or "New chat"
+            title = str(row[2]).strip()
             if len(title) > 72:
                 title = f"{title[:69].rstrip()}..."
             summaries.append(

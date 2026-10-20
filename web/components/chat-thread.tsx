@@ -22,11 +22,11 @@ import {
   apiRequest,
   API_PATHS,
   ApiError,
+  NEW_CHAT_EVENT,
   notifyConversationsChanged,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  readConversationId,
   readThread,
   writeConversationId,
   writeThread,
@@ -133,13 +133,25 @@ export function ChatThread() {
     const employeeId = user.employeeId;
     const token = user.demoToken;
     let cancelled = false;
+
+    // Landing on Chat (no ?c=) always starts a blank draft — history opens via ?c=.
+    if (!requestedId) {
+      setMessages([]);
+      setConversationId(null);
+      writeThread(employeeId, []);
+      writeConversationId(employeeId, null);
+      setHydrating(false);
+      return;
+    }
+
     setMessages(readThread(employeeId));
-    setConversationId(requestedId ?? readConversationId(employeeId));
+    setConversationId(requestedId);
     setHydrating(true);
-    const path = requestedId
-      ? API_PATHS.conversation(requestedId)
-      : API_PATHS.currentConversation;
-    apiRequest<ConversationPayload>("GET", path, token)
+    apiRequest<ConversationPayload>(
+      "GET",
+      API_PATHS.conversation(requestedId),
+      token,
+    )
       .then((payload) => {
         // Do not wipe an in-flight "confirm" bubble with a stale server snapshot.
         if (cancelled || sendingRef.current) {
@@ -150,16 +162,17 @@ export function ChatThread() {
         setConversationId(payload.conversation_id);
         writeThread(employeeId, next);
         writeConversationId(employeeId, payload.conversation_id);
-        if (!requestedId && payload.conversation_id) {
-          router.replace(`/?c=${payload.conversation_id}`, { scroll: false });
-        }
       })
       .catch((error: unknown) => {
         if (cancelled) {
           return;
         }
-        const detail = error instanceof Error ? error.message : "Could not load the saved conversation.";
+        const detail =
+          error instanceof Error
+            ? error.message
+            : "Could not load the saved conversation.";
         toast.error(detail);
+        router.replace("/", { scroll: false });
       })
       .finally(() => {
         if (!cancelled) {
@@ -174,6 +187,31 @@ export function ChatThread() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    function onNewChat() {
+      if (sendingRef.current) {
+        return;
+      }
+      messagesRef.current = [];
+      conversationIdRef.current = null;
+      setMessages([]);
+      setConversationId(null);
+      setDraft("");
+      if (user) {
+        writeThread(user.employeeId, []);
+        writeConversationId(user.employeeId, null);
+      }
+      if (requestedId) {
+        router.push("/");
+      }
+      composerRef.current?.focus();
+    }
+    window.addEventListener(NEW_CHAT_EVENT, onNewChat);
+    return () => {
+      window.removeEventListener(NEW_CHAT_EVENT, onNewChat);
+    };
+  }, [user, requestedId, router]);
 
   if (!user) {
     return null;
@@ -258,26 +296,11 @@ export function ChatThread() {
     void sendMessage("confirm");
   }
 
-  async function startNewChat() {
+  function startNewChat() {
     if (sending || hydrating) {
       return;
     }
-    try {
-      const created = await apiRequest<ConversationPayload>(
-        "POST",
-        API_PATHS.conversations,
-        session.demoToken,
-      );
-      persist([], created.conversation_id);
-      setDraft("");
-      notifyConversationsChanged();
-      if (created.conversation_id) {
-        router.push(`/?c=${created.conversation_id}`);
-      }
-      composerRef.current?.focus();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not start a new chat.");
-    }
+    window.dispatchEvent(new Event(NEW_CHAT_EVENT));
   }
 
   const canSend = Boolean(draft.trim()) && !sending && !hydrating;
