@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
+import { PageFrame, SurfaceCard } from "@/components/page-frame";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +25,16 @@ interface LeaveRow {
   business_days: number;
   status: string;
   created_at: string;
+}
+
+function statusTone(status: string): string {
+  if (status.includes("pending")) {
+    return "bg-amber-50 text-amber-900 border-amber-200";
+  }
+  if (status.includes("approved")) {
+    return "bg-teal-50 text-teal-900 border-teal-200";
+  }
+  return "bg-stone-100 text-stone-700 border-stone-200";
 }
 
 export function LeaveList() {
@@ -66,19 +78,25 @@ export function LeaveList() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My leave</h1>
-          <p className="text-sm text-muted-foreground">
-            Requests for the signed-in employee only. View only.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>
+    <PageFrame
+      eyebrow="Requests"
+      title="My leave"
+      description="Requests for the signed-in employee only. View only."
+      actions={
+        <Button
+          variant="outline"
+          onClick={() => void load()}
+          disabled={loading}
+          className="rounded-full border-stone-200 bg-white"
+        >
+          <RefreshCw
+            data-icon="inline-start"
+            className={loading ? "animate-spin" : undefined}
+          />
           {loading ? "Loading…" : "Refresh"}
         </Button>
-      </div>
-
+      }
+    >
       {error ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load</AlertTitle>
@@ -87,39 +105,49 @@ export function LeaveList() {
       ) : null}
 
       {rows && rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No leave requests yet for this persona.
-        </p>
+        <SurfaceCard className="px-5 py-10 text-center">
+          <p className="text-sm text-stone-500">
+            No leave requests yet for this persona.
+          </p>
+        </SurfaceCard>
       ) : null}
 
       {rows && rows.length > 0 ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Request</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Dates</TableHead>
-              <TableHead>Days</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.request_id}>
-                <TableCell className="font-mono text-xs">
-                  {row.request_id}
-                </TableCell>
-                <TableCell>{row.leave_type}</TableCell>
-                <TableCell>
-                  {row.start_date} → {row.end_date}
-                </TableCell>
-                <TableCell>{row.business_days}</TableCell>
-                <TableCell>{row.status}</TableCell>
+        <SurfaceCard className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="px-4">Request</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Dates</TableHead>
+                <TableHead>Days</TableHead>
+                <TableHead className="px-4">Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.request_id}>
+                  <TableCell className="px-4 font-mono text-xs text-stone-600">
+                    {row.request_id}
+                  </TableCell>
+                  <TableCell className="capitalize">{row.leave_type}</TableCell>
+                  <TableCell>
+                    {row.start_date} → {row.end_date}
+                  </TableCell>
+                  <TableCell>{row.business_days}</TableCell>
+                  <TableCell className="px-4">
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusTone(row.status)}`}
+                    >
+                      {row.status}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </SurfaceCard>
       ) : null}
-    </div>
+    </PageFrame>
   );
 }

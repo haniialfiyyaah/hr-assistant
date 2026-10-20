@@ -22,7 +22,11 @@ export const metadata: Metadata = {
     "Ask about HR policies with citations, check leave balance, and prepare leave requests.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="en"

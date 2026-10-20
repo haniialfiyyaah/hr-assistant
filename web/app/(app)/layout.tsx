@@ -10,7 +10,7 @@ export default function SignedInLayout({
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+        <div className="chat-surface flex min-h-screen items-center justify-center text-sm text-stone-500">
           Loading…
         </div>
       }

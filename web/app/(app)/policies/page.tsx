@@ -1,36 +1,38 @@
 import Link from "next/link";
+import { ArrowUpRight, FileText } from "lucide-react";
 
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageFrame, SurfaceCard } from "@/components/page-frame";
 import { listPolicies } from "@/lib/data";
 
 export default async function PoliciesPage() {
   const policies = await listPolicies();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Policies</h1>
-        <p className="text-sm text-muted-foreground">
-          Policy library from data/policies. View only.
-        </p>
-      </div>
+    <PageFrame
+      eyebrow="Library"
+      title="Policies"
+      description="Policy library from data/policies. View only."
+    >
       <div className="grid gap-3 sm:grid-cols-2">
         {policies.map((policy) => (
-          <Link key={policy.slug} href={`/policies/${policy.slug}`}>
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader>
-                <CardTitle className="text-base">{policy.title}</CardTitle>
-                <CardDescription>{policy.filename}</CardDescription>
-              </CardHeader>
-            </Card>
+          <Link key={policy.slug} href={`/policies/${policy.slug}`} className="group block">
+            <SurfaceCard className="h-full p-4 transition-[transform,background-color] duration-200 ease-out group-hover:bg-white group-active:scale-[0.99]">
+              <div className="flex items-start justify-between gap-3">
+                <span className="inline-flex size-9 items-center justify-center rounded-xl bg-teal-800/10 text-teal-900">
+                  <FileText className="size-4" />
+                </span>
+                <ArrowUpRight className="size-4 text-stone-300 transition-colors group-hover:text-teal-800" />
+              </div>
+              <p className="mt-3 text-base font-medium text-stone-900">
+                {policy.title}
+              </p>
+              <p className="mt-1 font-mono text-xs text-stone-500">
+                {policy.filename}
+              </p>
+            </SurfaceCard>
           </Link>
         ))}
       </div>
-    </div>
+    </PageFrame>
   );
 }

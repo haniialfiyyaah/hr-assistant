@@ -2,17 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { RefreshCw } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
+import { PageFrame, SurfaceCard } from "@/components/page-frame";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
 
 interface MonitoringSummary {
@@ -80,32 +75,34 @@ export function MonitoringPanel() {
 
   if (user.role !== "monitoring_admin") {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+      <div className="flex min-h-[40vh] items-center justify-center text-sm text-stone-500">
         Redirecting…
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Monitoring</h1>
-          <p className="text-sm text-muted-foreground">
-            Aggregate metrics and alerts for the monitoring admin.
-          </p>
-        </div>
+    <PageFrame
+      eyebrow="Operations"
+      title="Monitoring"
+      description="Aggregate metrics and alerts for the monitoring admin."
+      actions={
         <Button
           variant="outline"
           onClick={() => void load()}
           disabled={loading}
+          className="rounded-full border-stone-200 bg-white"
         >
+          <RefreshCw
+            data-icon="inline-start"
+            className={loading ? "animate-spin" : undefined}
+          />
           {loading ? "Loading…" : "Refresh"}
         </Button>
-      </div>
-
+      }
+    >
       {loading && !summary && !error ? (
-        <p className="text-sm text-muted-foreground">Loading monitoring…</p>
+        <p className="text-sm text-stone-500">Loading monitoring…</p>
       ) : null}
 
       {error ? (
@@ -116,57 +113,44 @@ export function MonitoringPanel() {
       ) : null}
 
       {summary ? (
-        <div className="grid gap-3 sm:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Runs</CardDescription>
-              <CardTitle className="text-2xl">{summary.run_count}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Error rate</CardDescription>
-              <CardTitle className="text-2xl">
-                {(summary.error_rate * 100).toFixed(1)}%
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>p95 latency</CardDescription>
-              <CardTitle className="text-2xl">
-                {Math.round(summary.p95_latency_ms)} ms
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Tool calls</CardDescription>
-              <CardTitle className="text-2xl">{summary.tool_calls}</CardTitle>
-            </CardHeader>
-          </Card>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(
+            [
+              ["Runs", String(summary.run_count)],
+              ["Error rate", `${(summary.error_rate * 100).toFixed(1)}%`],
+              ["p95 latency", `${Math.round(summary.p95_latency_ms)} ms`],
+              ["Tool calls", String(summary.tool_calls)],
+            ] as const
+          ).map(([label, value]) => (
+            <SurfaceCard key={label} className="p-4">
+              <p className="text-xs tracking-wide text-stone-500 uppercase">
+                {label}
+              </p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-stone-900">
+                {value}
+              </p>
+            </SurfaceCard>
+          ))}
         </div>
       ) : null}
 
       {alerts ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Active alerts</CardTitle>
-            <CardDescription>
+        <SurfaceCard className="overflow-hidden">
+          <div className="border-b border-stone-200/80 px-5 py-4">
+            <p className="text-base font-medium text-stone-900">Active alerts</p>
+            <p className="mt-1 text-sm text-stone-500">
               {alerts.length
                 ? `${alerts.length} alert(s)`
                 : "No alerts are currently triggered."}
-            </CardDescription>
-          </CardHeader>
+            </p>
+          </div>
           {alerts.length ? (
-            <CardContent>
-              <pre className="overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
-                {JSON.stringify(alerts, null, 2)}
-              </pre>
-            </CardContent>
+            <pre className="overflow-auto bg-stone-50/80 p-5 text-xs text-stone-700">
+              {JSON.stringify(alerts, null, 2)}
+            </pre>
           ) : null}
-        </Card>
+        </SurfaceCard>
       ) : null}
-    </div>
+    </PageFrame>
   );
 }

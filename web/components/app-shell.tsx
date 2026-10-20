@@ -10,13 +10,14 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
+  Sparkles,
   Users,
 } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_KEY = "hr-assistant.sidebar-collapsed";
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, ready, signOut } = useAuth();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const isChatHome = pathname === "/";
 
   useEffect(() => {
     setCollapsed(sessionStorage.getItem(SIDEBAR_KEY) === "1");
@@ -86,17 +88,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!ready || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+      <div className="chat-surface flex min-h-screen items-center justify-center text-sm text-stone-500">
         Loading…
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-svh min-h-0 chat-surface text-stone-900">
       <aside
         className={cn(
-          "flex shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground transition-[width] duration-200",
+          "flex shrink-0 flex-col border-r border-stone-200/80 bg-white/70 text-stone-800 backdrop-blur-md transition-[width] duration-200 ease-out",
           collapsed ? "w-16" : "w-60",
         )}
       >
@@ -107,15 +109,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         >
           {!collapsed ? (
-            <div className="min-w-0 flex-1 flex-col gap-1 px-1">
-              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                HR Assistant
-              </p>
-              <p className="text-sm leading-snug font-semibold">
-                Policy and Leave Assistant
+            <div className="min-w-0 flex-1 px-1">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="inline-flex size-7 items-center justify-center rounded-full bg-teal-800 text-white">
+                  <Sparkles className="size-3.5" />
+                </span>
+                <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
+                  HR Assistant
+                </p>
+              </div>
+              <p className="text-sm leading-snug font-semibold text-stone-900">
+                Policy and Leave
               </p>
             </div>
-          ) : null}
+          ) : (
+            <span className="inline-flex size-8 items-center justify-center rounded-full bg-teal-800 text-white">
+              <Sparkles className="size-3.5" />
+            </span>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -124,11 +135,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!collapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="text-stone-500 hover:bg-stone-100 hover:text-stone-800"
           >
             {collapsed ? <ChevronRight /> : <ChevronLeft />}
           </Button>
         </div>
-        <Separator />
+
         <nav className="flex flex-1 flex-col gap-1 p-2">
           {NAV.filter((item) => item.roles.includes(user.role)).map((item) => {
             const active =
@@ -142,11 +154,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 title={item.label}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm transition-[background-color,color,transform] duration-200 ease-out active:scale-[0.98]",
                   collapsed && "justify-center px-0",
                   active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                    ? "bg-teal-800 text-white shadow-sm"
+                    : "text-stone-600 hover:bg-stone-100 hover:text-stone-900",
                 )}
               >
                 <Icon className="size-4 shrink-0" />
@@ -155,20 +167,63 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{user.displayName}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {user.employeeId} · {user.role.replace("_", " ")}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={signOut}>
-            Sign out
+
+        <div className="border-t border-stone-200/80 p-2">
+          {!collapsed ? (
+            <div className="mb-2 rounded-xl bg-stone-50 px-3 py-2">
+              <p className="truncate text-sm font-medium text-stone-800">
+                {user.displayName}
+              </p>
+              <p className="truncate text-[11px] text-stone-500">
+                {user.employeeId} · {user.role.replace("_", " ")}
+              </p>
+            </div>
+          ) : null}
+          <Button
+            variant="ghost"
+            size={collapsed ? "icon-sm" : "sm"}
+            onClick={signOut}
+            className={cn(
+              "w-full justify-start text-stone-600 hover:bg-stone-100 hover:text-stone-900",
+              collapsed && "justify-center",
+            )}
+            title="Sign out"
+          >
+            <LogOut data-icon="inline-start" />
+            {!collapsed ? "Sign out" : null}
           </Button>
-        </header>
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {!isChatHome ? (
+          <header className="flex items-center justify-between gap-4 border-b border-stone-200/70 bg-white/55 px-6 py-3 backdrop-blur-sm">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-stone-900">
+                {user.displayName}
+              </p>
+              <p className="truncate text-xs text-stone-500">
+                {user.employeeId} · {user.role.replace("_", " ")}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={signOut}
+              className="rounded-full border-stone-200 bg-white"
+            >
+              Sign out
+            </Button>
+          </header>
+        ) : null}
+        <main
+          className={cn(
+            "min-h-0 flex-1",
+            isChatHome ? "flex flex-col overflow-hidden p-0" : "overflow-auto p-6",
+          )}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

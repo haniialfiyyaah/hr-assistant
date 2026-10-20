@@ -1,16 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  ArrowUp,
+  BookOpen,
+  CalendarDays,
+  CheckCircle2,
+  LoaderCircle,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/auth-provider";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   getIdempotencyKey,
   readThread,
@@ -20,15 +27,51 @@ import {
 } from "@/lib/session";
 
 const EXAMPLES = [
-  "How many annual leave days do I get?",
-  "What is my leave balance?",
-];
+  {
+    label: "Annual leave policy",
+    prompt: "How many annual leave days do permanent employees get?",
+  },
+  {
+    label: "My balance",
+    prompt: "What is my leave balance?",
+  },
+  {
+    label: "Prepare leave",
+    prompt: "Prepare annual leave from 2026-11-02 to 2026-11-03",
+  },
+] as const;
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return "";
+  }
+}
+
+function outcomeTone(outcome: string): string {
+  switch (outcome) {
+    case "action_proposed":
+      return "border-teal-600/20 bg-teal-50 text-teal-900";
+    case "answered":
+      return "border-sky-600/20 bg-sky-50 text-sky-900";
+    case "escalated":
+      return "border-amber-600/20 bg-amber-50 text-amber-950";
+    case "abstained":
+      return "border-stone-400/30 bg-stone-100 text-stone-700";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
 }
 
 export function ChatThread() {
@@ -38,6 +81,7 @@ export function ChatThread() {
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!user) {
@@ -108,6 +152,7 @@ export function ChatThread() {
       persist([...withUser, assistantMessage]);
     } finally {
       setSending(false);
+      composerRef.current?.focus();
     }
   }
 
@@ -127,94 +172,166 @@ export function ChatThread() {
         }`,
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Confirm failed",
-      );
+      toast.error(error instanceof Error ? error.message : "Confirm failed");
     } finally {
       setConfirming(null);
     }
   }
 
+  const canSend = Boolean(draft.trim()) && !sending;
+
   return (
-    <div className="mx-auto flex h-[calc(100vh-7rem)] w-full max-w-3xl flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Chat</h1>
-        <p className="text-sm text-muted-foreground">
-          History stays in this browser only. Each send posts the latest message
-          alone to the API.
-        </p>
-      </div>
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-white/55 to-transparent" />
 
-      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <ScrollArea className="flex-1 px-4 py-4">
-          <div className="flex flex-col gap-4">
-            {messages.length === 0 ? (
-              <div className="flex flex-col gap-3 py-10 text-center">
-                <p className="text-sm text-muted-foreground">
-                  Ask a question or request. Examples:
-                </p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {EXAMPLES.map((example) => (
-                    <Button
-                      key={example}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDraft(example)}
-                    >
-                      {example}
-                    </Button>
-                  ))}
-                </div>
+      <header className="relative z-10 flex items-end justify-between gap-4 border-b border-stone-200/70 px-6 py-4 backdrop-blur-sm">
+        <div className="min-w-0">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="inline-flex size-7 items-center justify-center rounded-full bg-teal-800 text-white shadow-sm">
+              <Sparkles className="size-3.5" />
+            </span>
+            <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
+              Assistant
+            </p>
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">
+            How can I help with leave or policy?
+          </h1>
+          <p className="mt-1 max-w-xl text-sm text-stone-500">
+            Ask in one message with clear dates and leave type when you need a
+            proposal. Thread history stays in this browser only.
+          </p>
+        </div>
+        <div className="hidden shrink-0 rounded-full border border-stone-200 bg-white/80 px-3 py-1.5 text-xs text-stone-500 sm:block">
+          Signed in as {session.displayName.split(" ")[0]}
+        </div>
+      </header>
+
+      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+          {messages.length === 0 ? (
+            <div className="chat-rise flex flex-col items-center gap-6 py-12 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl border border-teal-700/15 bg-white/80 shadow-[0_12px_40px_-24px_oklch(0.4_0.08_200)]">
+                <BookOpen className="size-6 text-teal-800" />
               </div>
-            ) : null}
+              <div className="max-w-md">
+                <p className="text-lg font-medium tracking-tight text-stone-900">
+                  Start a policy or leave conversation
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-stone-500">
+                  Try a demo prompt below, or write your own. Leave proposals
+                  still need an explicit Confirm.
+                </p>
+              </div>
+              <div className="flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+                {EXAMPLES.map((example) => (
+                  <button
+                    key={example.label}
+                    type="button"
+                    onClick={() => {
+                      setDraft(example.prompt);
+                      composerRef.current?.focus();
+                    }}
+                    className="rounded-2xl border border-stone-200/90 bg-white/85 px-4 py-3 text-left shadow-sm transition-[transform,opacity,background-color] duration-200 ease-out hover:bg-white active:scale-[0.98] sm:max-w-[15rem]"
+                  >
+                    <p className="text-sm font-medium text-stone-800">
+                      {example.label}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-stone-500">
+                      {example.prompt}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-            {messages.map((message) => (
+          {messages.map((message, index) => {
+            const isUser = message.role === "user";
+            return (
               <div
                 key={message.id}
-                className={
-                  message.role === "user"
-                    ? "ml-8 flex justify-end"
-                    : "mr-8 flex justify-start"
-                }
+                className={cn(
+                  "chat-rise flex gap-3",
+                  isUser ? "justify-end" : "justify-start",
+                )}
+                style={{ animationDelay: `${Math.min(index, 6) * 20}ms` }}
               >
+                {!isUser ? (
+                  <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white">
+                    HR
+                  </div>
+                ) : null}
                 <div
-                  className={
-                    message.role === "user"
-                      ? "max-w-[90%] rounded-2xl bg-primary px-4 py-3 text-sm text-primary-foreground"
-                      : "max-w-[90%] rounded-2xl border border-border bg-card px-4 py-3 text-sm"
-                  }
+                  className={cn(
+                    "flex max-w-[min(100%,36rem)] flex-col gap-1.5",
+                    isUser && "items-end",
+                  )}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                  {message.response ? (
-                    <AssistantExtras
-                      response={message.response}
-                      confirming={confirming}
-                      onConfirm={confirmProposal}
-                    />
-                  ) : null}
+                  <div
+                    className={cn(
+                      "px-4 py-3 text-[15px] leading-relaxed shadow-sm",
+                      isUser
+                        ? "rounded-[1.35rem] rounded-br-md bg-stone-900 text-stone-50"
+                        : "rounded-[1.35rem] rounded-bl-md border border-stone-200/80 bg-white/90 text-stone-800",
+                    )}
+                  >
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {message.response ? (
+                      <AssistantExtras
+                        response={message.response}
+                        confirming={confirming}
+                        onConfirm={confirmProposal}
+                      />
+                    ) : null}
+                  </div>
+                  <p className="px-1 text-[11px] text-stone-400">
+                    {isUser ? "You" : "Assistant"} · {formatTime(message.createdAt)}
+                  </p>
+                </div>
+                {isUser ? (
+                  <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[11px] font-semibold text-stone-700">
+                    {session.displayName.slice(0, 1).toUpperCase()}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+
+          {sending ? (
+            <div className="chat-rise flex items-start gap-3">
+              <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white">
+                HR
+              </div>
+              <div className="rounded-[1.35rem] rounded-bl-md border border-stone-200/80 bg-white/90 px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-1.5">
+                  <span className="chat-dot size-1.5 rounded-full bg-stone-400" />
+                  <span className="chat-dot size-1.5 rounded-full bg-stone-400" />
+                  <span className="chat-dot size-1.5 rounded-full bg-stone-400" />
                 </div>
               </div>
-            ))}
-            {sending ? (
-              <p className="text-sm text-muted-foreground">Working…</p>
-            ) : null}
-            <div ref={bottomRef} />
-          </div>
-        </ScrollArea>
+            </div>
+          ) : null}
+          <div ref={bottomRef} />
+        </div>
+      </div>
 
-        <div className="border-t border-border p-4">
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void sendMessage(draft);
-            }}
-          >
+      <div className="relative z-10 border-t border-stone-200/70 bg-white/75 px-4 py-4 backdrop-blur-md sm:px-6">
+        <form
+          className="mx-auto w-full max-w-3xl"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void sendMessage(draft);
+          }}
+        >
+          <div className="rounded-[1.5rem] border border-stone-200 bg-white p-2 shadow-[0_18px_50px_-30px_oklch(0.35_0.04_220)] transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-teal-700/30 focus-within:shadow-[0_18px_50px_-28px_oklch(0.45_0.06_190)]">
             <Textarea
+              ref={composerRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Message the assistant…"
-              rows={3}
+              placeholder="Message the HR assistant…"
+              rows={2}
+              className="min-h-[4.5rem] resize-none border-0 bg-transparent px-3 py-2 text-[15px] shadow-none focus-visible:ring-0"
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -222,14 +339,27 @@ export function ChatThread() {
                 }
               }}
             />
-            <div className="flex justify-end">
-              <Button type="submit" disabled={sending || !draft.trim()}>
+            <div className="flex items-center justify-between gap-3 px-2 pb-1">
+              <p className="text-[11px] text-stone-400">
+                Enter to send · Shift+Enter for a new line
+              </p>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!canSend}
+                className="rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.97]"
+              >
+                {sending ? (
+                  <LoaderCircle className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <ArrowUp data-icon="inline-start" />
+                )}
                 Send
               </Button>
             </div>
-          </form>
-        </div>
-      </Card>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -245,84 +375,123 @@ function AssistantExtras({
 }) {
   const proposal = response.action_proposal;
   return (
-    <div className="mt-3 flex flex-col gap-3 border-t border-border/60 pt-3 text-foreground">
+    <div className="mt-4 flex flex-col gap-3 border-t border-stone-200/80 pt-3 text-stone-800">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary">Outcome: {response.outcome}</Badge>
-        <Badge variant="outline">Trace: {response.trace_id}</Badge>
+        <span
+          className={cn(
+            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium capitalize",
+            outcomeTone(response.outcome),
+          )}
+        >
+          {response.outcome.replaceAll("_", " ")}
+        </span>
+        <Badge variant="outline" className="font-mono text-[10px]">
+          {response.trace_id}
+        </Badge>
       </div>
 
       {response.citations?.length ? (
         <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium text-muted-foreground">
+          <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+            <BookOpen className="size-3.5" />
             Policy sources
           </p>
           {response.citations.map((citation, index) => (
             <div
               key={`${citation.document_id}-${index}`}
-              className="rounded-lg bg-muted/50 p-2 text-xs"
+              className="rounded-xl border border-stone-200/80 bg-stone-50/90 p-3 text-xs"
             >
-              <p className="font-medium">
+              <p className="font-medium text-stone-800">
                 {citation.document_id}
                 {citation.section ? ` — ${citation.section}` : ""}
               </p>
-              <p className="mt-1 text-muted-foreground">{citation.excerpt}</p>
+              <p className="mt-1.5 leading-relaxed text-stone-500">
+                {citation.excerpt}
+              </p>
             </div>
           ))}
         </div>
       ) : null}
 
       {response.tool_calls?.length ? (
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-muted-foreground">Tools used</p>
+        <div className="flex flex-col gap-1.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-stone-500 uppercase">
+            <Wrench className="size-3.5" />
+            Tools
+          </p>
           {response.tool_calls.map((tool, index) => (
-            <p key={`${tool.name}-${index}`} className="text-xs text-muted-foreground">
-              <code>{tool.name}</code> · {tool.status} · {tool.duration_ms} ms
+            <p
+              key={`${tool.name}-${index}`}
+              className="font-mono text-[11px] text-stone-500"
+            >
+              {tool.name}
+              <span className="text-stone-400">
+                {" "}
+                · {tool.status} · {tool.duration_ms} ms
+              </span>
             </p>
           ))}
         </div>
       ) : null}
 
       {proposal ? (
-        <Alert>
-          <AlertTitle>Leave proposal ready</AlertTitle>
-          <AlertDescription>
-            <p className="mb-2">
-              A leave request has not been created yet. Review, then confirm to
-              open pending manager review.
-            </p>
-            <div className="grid gap-2 text-sm sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Type</p>
-                <p>{proposal.leave_type}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Dates</p>
-                <p>
-                  {proposal.start_date} → {proposal.end_date}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Business days</p>
-                <p>{proposal.business_days}</p>
-              </div>
-            </div>
-            {proposal.reason ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Reason: {proposal.reason}
+        <div className="overflow-hidden rounded-2xl border border-teal-800/15 bg-gradient-to-br from-teal-50 to-white">
+          <div className="flex items-start gap-2 border-b border-teal-800/10 px-4 py-3">
+            <CalendarDays className="mt-0.5 size-4 text-teal-800" />
+            <div>
+              <p className="text-sm font-medium text-teal-950">
+                Leave proposal ready
               </p>
-            ) : null}
+              <p className="mt-0.5 text-xs leading-relaxed text-teal-900/70">
+                Not created yet. Confirm to open pending manager review.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 px-4 py-3 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+                Type
+              </p>
+              <p className="mt-0.5 font-medium capitalize">{proposal.leave_type}</p>
+            </div>
+            <div>
+              <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+                Dates
+              </p>
+              <p className="mt-0.5 font-medium">
+                {proposal.start_date} → {proposal.end_date}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+                Business days
+              </p>
+              <p className="mt-0.5 font-medium">{proposal.business_days}</p>
+            </div>
+          </div>
+          {proposal.reason ? (
+            <p className="border-t border-teal-800/10 px-4 py-2 text-xs text-stone-500">
+              Reason: {proposal.reason}
+            </p>
+          ) : null}
+          <div className="px-4 pb-4">
             <Button
-              className="mt-3"
+              className="w-full rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.98] sm:w-auto"
               size="sm"
               disabled={confirming === proposal.proposal_id}
               onClick={() => onConfirm(proposal.proposal_id)}
             >
+              {confirming === proposal.proposal_id ? (
+                <LoaderCircle className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <CheckCircle2 data-icon="inline-start" />
+              )}
               {confirming === proposal.proposal_id
                 ? "Confirming…"
                 : "Confirm pending leave request"}
             </Button>
-          </AlertDescription>
-        </Alert>
+          </div>
+        </div>
       ) : null}
     </div>
   );

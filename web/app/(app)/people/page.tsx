@@ -1,3 +1,4 @@
+import { PageFrame, SurfaceCard } from "@/components/page-frame";
 import {
   Table,
   TableBody,
@@ -12,41 +13,45 @@ export default async function PeoplePage() {
   const employees = await listEmployees();
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">People</h1>
-        <p className="text-sm text-muted-foreground">
-          Synthetic directory from employees.json. Tokens are hidden. View only.
-        </p>
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Employee ID</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Balances</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {employees.map((employee) => (
-            <TableRow key={employee.employee_id}>
-              <TableCell>{employee.display_name}</TableCell>
-              <TableCell className="font-mono text-xs">
-                {employee.employee_id}
-              </TableCell>
-              <TableCell>{employee.role}</TableCell>
-              <TableCell className="text-sm text-muted-foreground">
-                {Object.keys(employee.balances).length
-                  ? Object.entries(employee.balances)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(" · ")
-                  : "—"}
-              </TableCell>
+    <PageFrame
+      eyebrow="Directory"
+      title="People"
+      description="Synthetic directory from employees.json. Tokens are hidden. View only."
+    >
+      <SurfaceCard className="overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="px-4">Name</TableHead>
+              <TableHead>Employee ID</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead className="px-4">Balances</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {employees.map((employee) => (
+              <TableRow key={employee.employee_id}>
+                <TableCell className="px-4 font-medium text-stone-900">
+                  {employee.display_name}
+                </TableCell>
+                <TableCell className="font-mono text-xs text-stone-600">
+                  {employee.employee_id}
+                </TableCell>
+                <TableCell className="capitalize text-stone-700">
+                  {employee.role.replaceAll("_", " ")}
+                </TableCell>
+                <TableCell className="px-4 text-sm text-stone-500">
+                  {Object.keys(employee.balances).length
+                    ? Object.entries(employee.balances)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(" · ")
+                    : "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </SurfaceCard>
+    </PageFrame>
   );
 }
