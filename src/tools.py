@@ -64,6 +64,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         name="prepare_leave_request",
         description=(
             "Validate and prepare a leave request proposal. "
+            "Search leave submission policy first when possible. "
+            "Annual leave requires at least three business days' notice before the start date. "
             "Does not create a leave request until the user confirms."
         ),
         properties={

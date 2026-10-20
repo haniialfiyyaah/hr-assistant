@@ -6,11 +6,21 @@ import pytest
 from pydantic import ValidationError
 
 from src.contracts import LeaveBalance, PrepareLeaveArgs
-from src.domain import DomainError, business_days, validate_leave_request
+from src.domain import (
+    DomainError,
+    add_business_days,
+    business_days,
+    validate_leave_request,
+)
 
 
 def test_business_days_excludes_weekend() -> None:
     assert business_days(date(2026, 9, 25), date(2026, 9, 28)) == 2
+
+
+def test_add_business_days_skips_weekend() -> None:
+    # Wednesday + 3 business days → Monday next week
+    assert add_business_days(date(2026, 9, 23), 3) == date(2026, 9, 28)
 
 
 @pytest.mark.parametrize(
@@ -18,6 +28,8 @@ def test_business_days_excludes_weekend() -> None:
     [
         (date(2026, 9, 22), date(2026, 9, 24), "masa lalu"),
         (date(2026, 9, 25), date(2026, 9, 24), "sebelum"),
+        # Wednesday today; Friday is only 2 business days ahead → notice too short
+        (date(2026, 9, 25), date(2026, 9, 25), "tiga hari kerja"),
     ],
 )
 def test_invalid_dates_are_blocked(start: date, end: date, message: str) -> None:
@@ -29,6 +41,24 @@ def test_invalid_dates_are_blocked(start: date, end: date, message: str) -> None
             False,
             date(2026, 9, 23),
         )
+
+
+def test_annual_leave_allows_start_on_third_business_day() -> None:
+    # Wednesday + 3 BD = Monday 28 Sep
+    args = PrepareLeaveArgs(
+        start_date=date(2026, 9, 28),
+        end_date=date(2026, 9, 28),
+        leave_type="annual",
+        reason="holiday",
+    )
+    days, summary = validate_leave_request(
+        args,
+        [LeaveBalance(leave_type="annual", available_days=8, as_of_date=date(2026, 1, 1))],
+        False,
+        date(2026, 9, 23),
+    )
+    assert days == 1
+    assert "notice_business_days>=3" in summary
 
 
 def test_insufficient_balance_and_overlap_are_blocked() -> None:

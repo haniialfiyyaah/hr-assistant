@@ -10,6 +10,10 @@ class DomainError(ValueError):
     pass
 
 
+# HR-LEAVE-001: submit at least this many business days before the start date.
+ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS = 3
+
+
 def business_days(start: date, end: date) -> int:
     """Count inclusive weekdays between start and end (Saturday/Sunday excluded)."""
     if end < start:
@@ -23,6 +27,19 @@ def business_days(start: date, end: date) -> int:
     if days == 0:
         raise DomainError("Rentang tanggal tidak mengandung hari kerja.")
     return days
+
+
+def add_business_days(day: date, count: int) -> date:
+    """Return the date that is `count` weekdays after `day` (not counting `day`)."""
+    if count < 0:
+        raise DomainError("Business-day offset must be non-negative.")
+    current = day
+    seen = 0
+    while seen < count:
+        current += timedelta(days=1)
+        if current.weekday() < 5:
+            seen += 1
+    return current
 
 
 def validate_leave_request(
@@ -39,6 +56,14 @@ def validate_leave_request(
     if overlaps:
         raise DomainError("Permintaan cuti bertumpang tindih dengan permintaan aktif.")
 
+    if args.leave_type == "annual":
+        earliest = add_business_days(today, ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS)
+        if args.start_date < earliest:
+            raise DomainError(
+                "Pengajuan cuti tahunan harus paling lambat tiga hari kerja "
+                "sebelum tanggal mulai."
+            )
+
     days = business_days(args.start_date, args.end_date)
     available = next(
         (item.available_days for item in balances if item.leave_type == args.leave_type),
@@ -53,6 +78,8 @@ def validate_leave_request(
         f"available_days={available}",
         "overlap=false",
     ]
+    if args.leave_type == "annual":
+        summary.append(f"notice_business_days>={ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS}")
     return days, summary
 
 
