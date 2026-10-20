@@ -70,7 +70,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "start_date": {"type": "string", "description": "ISO date YYYY-MM-DD"},
             "end_date": {"type": "string", "description": "ISO date YYYY-MM-DD"},
             "leave_type": {"type": "string", "enum": ["annual", "sick", "parental"]},
-            "reason": {"type": ["string", "null"], "maxLength": 300},
+            "reason": {
+                "type": ["string", "null"],
+                "maxLength": 300,
+                "description": (
+                    "Short reason from the user when they gave one "
+                    "(for example holiday or family). Null only if they gave none."
+                ),
+            },
         },
         required=["start_date", "end_date", "leave_type", "reason"],
     ),

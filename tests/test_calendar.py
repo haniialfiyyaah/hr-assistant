@@ -21,4 +21,6 @@ def test_next_week_from_tuesday_is_monday_to_friday() -> None:
     assert "2026-10-26" in brief
     assert "2026-10-30" in brief
     assert "2026-10-27" in brief
+    assert "This Friday is 2026-10-23" in brief
+    assert "Next Friday is 2026-10-30" in brief
     assert "Public holidays are not excluded." in brief
