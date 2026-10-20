@@ -14,7 +14,7 @@ A human still approves leave. There is no approve tool.
 ## Runtime view
 
 ```text
-Streamlit UI (port 8501)
+Next.js UI (port 3000)
   -> FastAPI (port 8000) + Bearer auth
   -> Bounded agent loop
        -> search_hr_policy (hybrid retrieval)

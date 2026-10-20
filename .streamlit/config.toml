@@ -1,4 +1,0 @@
-# No [theme] section — keeps Streamlit's built-in Light / Dark selector
-# (⋮ → Settings → Theme).
-[server]
-headless = true

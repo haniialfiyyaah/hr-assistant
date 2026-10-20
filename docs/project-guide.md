@@ -30,7 +30,7 @@ A **hard gate** is a rule that **must never fail**. In live evaluation, hard-gat
 
 | Piece | Role | Default |
 | --- | --- | --- |
-| Streamlit (`app.py`) | Demo UI only; talks to HTTP API | `:8501` |
+| Next.js (`web/`) | Demo UI; talks to HTTP API via `/api/v1` rewrite | `:3000` |
 | FastAPI (`src/api.py`) | Auth, chat, confirm, monitoring | `:8000` |
 | Agent (`src/agent.py`) | Bounded tool loop + outcome gates | — |
 | Tools (`src/tools.py`) | Four tools (no approve) | — |
@@ -40,7 +40,7 @@ A **hard gate** is a rule that **must never fail**. In live evaluation, hard-gat
 | OpenAI | Embeddings + Responses API (`store=False`) | From `.env` |
 
 ```text
-Streamlit UI
+Next.js UI
     │  Bearer demo token
     ▼
 FastAPI  ──►  Agent loop  ──►  Tools / RAG
@@ -60,7 +60,7 @@ FastAPI  ──►  Agent loop  ──►  Tools / RAG
 
 ```mermaid
 flowchart TB
-  UI[Streamlit UI + persona token] --> API[FastAPI POST /api/v1/chat]
+  UI[Next.js UI + demo token] --> API[FastAPI POST /api/v1/chat]
   API --> Auth[Resolve bearer → AuthContext]
   Auth --> Agent[Bounded agent loop]
   Agent -->|function_call| Tools{Tools}
@@ -159,7 +159,7 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-  participant UI as Streamlit
+  participant UI as Next.js
   participant API as FastAPI / Agent
   participant OAI as OpenAI
   participant PG as Postgres
@@ -254,8 +254,8 @@ Domain rules in `src/domain.py` (no model calls): past dates, end before start, 
 | `src/api.py` | FastAPI app and endpoints |
 | `src/setup_lab.py` | Schema + seed employees/policies/embeddings |
 | `src/run_evaluation.py` | 15-case live evaluation → GO/NO-GO |
-| `app.py` | Streamlit client |
-| `ui_contract.py` | Persona load/switch + API path contract |
+| `web/` | Next.js demo UI |
+| `ui_contract.py` | Demo persona load/switch + API path contract (tests) |
 | `data/policies/` | Synthetic HR policy corpus (mostly Indonesian) |
 | `data/evaluation_cases.json` | Graded live cases |
 | `tests/` | Offline + live markers |

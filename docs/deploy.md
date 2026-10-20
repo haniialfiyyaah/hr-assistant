@@ -106,7 +106,3 @@ Optional API-only check (Swagger): `https://<api-host>/docs` with bearer `token-
 | OpenAI models | `.env` | API host secrets |
 
 Never commit `.env` or real secrets.
-
-## Deprecated
-
-[`render.yaml`](../render.yaml) is no longer the deploy path. Prefer Vercel for the UI. You may delete that Blueprint file once no Render services remain.

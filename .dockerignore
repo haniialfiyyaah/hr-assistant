@@ -9,7 +9,6 @@ outputs/
 *.log
 *.db
 *.sqlite*
-.streamlit/secrets.toml
 web/node_modules/
 web/.next/
 web/out/

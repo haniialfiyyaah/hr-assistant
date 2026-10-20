@@ -1,5 +1,0 @@
-# DEPRECATED — production UI is on Vercel (see docs/deploy.md).
-# Kept only so an old Render Blueprint does not surprise-delete if still linked.
-# Do not create new Render services from this file.
-
-services: []

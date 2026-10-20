@@ -1,4 +1,4 @@
-# App image for FastAPI and Streamlit. Build does not require OPENAI_API_KEY.
+# FastAPI app image. Build does not require OPENAI_API_KEY.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,17 +14,14 @@ COPY src ./src
 COPY data ./data
 COPY tests ./tests
 COPY scripts ./scripts
-COPY app.py ui_contract.py demo_personas.json pyproject.toml ./
-COPY .streamlit ./.streamlit
+COPY ui_contract.py demo_personas.json pyproject.toml ./
 
-RUN chmod +x scripts/start-api.sh scripts/start-ui.sh \
+RUN chmod +x scripts/start-api.sh \
     && useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
 
-# No ENTRYPOINT so Compose / Render can override CMD for Streamlit, seed, and tests.
+# No ENTRYPOINT so Compose can override CMD for seed and tests.
 CMD ["sh", "/app/scripts/start-api.sh"]
-
-

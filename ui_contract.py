@@ -1,4 +1,4 @@
-"""Testable persona selection and API contract for the supplied Streamlit client."""
+"""Testable demo persona selection and API path contract (shared by UI tests)."""
 
 from __future__ import annotations
 
