@@ -3,6 +3,8 @@
 /** Same-origin paths; Next rewrites proxy to FastAPI. */
 export const API_PATHS = {
   chat: "/api/v1/chat",
+  currentConversation: "/api/v1/conversations/current",
+  conversations: "/api/v1/conversations",
   confirm: (proposalId: string) =>
     `/api/v1/action-proposals/${proposalId}/confirm`,
   myRequests: "/api/v1/leave-requests/me",

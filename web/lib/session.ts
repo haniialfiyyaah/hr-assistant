@@ -4,6 +4,7 @@ import type { SessionUser } from "@/lib/demo-accounts";
 
 const SESSION_KEY = "hr-assistant.session";
 const THREAD_PREFIX = "hr-assistant.thread.";
+const CONVERSATION_PREFIX = "hr-assistant.conversation.";
 const IDEM_PREFIX = "hr-assistant.idem.";
 
 export function readSession(): SessionUser | null {
@@ -33,7 +34,11 @@ export function clearSession(): void {
     sessionStorage.removeItem(`${THREAD_PREFIX}${previous.employeeId}`);
   }
   for (const key of Object.keys(sessionStorage)) {
-    if (key.startsWith(IDEM_PREFIX) || key.startsWith(THREAD_PREFIX)) {
+    if (
+      key.startsWith(IDEM_PREFIX) ||
+      key.startsWith(THREAD_PREFIX) ||
+      key.startsWith(CONVERSATION_PREFIX)
+    ) {
       sessionStorage.removeItem(key);
     }
   }
@@ -69,6 +74,21 @@ export interface ChatResponsePayload {
   tool_calls: ChatToolCall[];
   action_proposal: ChatProposal | null;
   trace_id: string;
+  conversation_id?: string | null;
+}
+
+export interface ServerThreadMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  outcome: string | null;
+  action_proposal: ChatProposal | null;
+}
+
+export interface ConversationPayload {
+  conversation_id: string | null;
+  messages: ServerThreadMessage[];
 }
 
 export interface ThreadMessage {
@@ -93,6 +113,22 @@ export function readThread(employeeId: string): ThreadMessage[] {
 
 export function writeThread(employeeId: string, messages: ThreadMessage[]): void {
   sessionStorage.setItem(`${THREAD_PREFIX}${employeeId}`, JSON.stringify(messages));
+}
+
+export function readConversationId(employeeId: string): string | null {
+  return sessionStorage.getItem(`${CONVERSATION_PREFIX}${employeeId}`);
+}
+
+export function writeConversationId(
+  employeeId: string,
+  conversationId: string | null,
+): void {
+  const key = `${CONVERSATION_PREFIX}${employeeId}`;
+  if (!conversationId) {
+    sessionStorage.removeItem(key);
+    return;
+  }
+  sessionStorage.setItem(key, conversationId);
 }
 
 export function getIdempotencyKey(proposalId: string): string {

@@ -21,9 +21,13 @@ import { apiRequest, API_PATHS, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   getIdempotencyKey,
+  readConversationId,
   readThread,
+  writeConversationId,
   writeThread,
   type ChatResponsePayload,
+  type ConversationPayload,
+  type ServerThreadMessage,
   type ThreadMessage,
 } from "@/lib/session";
 
@@ -60,6 +64,26 @@ function formatTime(iso: string): string {
   }
 }
 
+function toThreadMessage(message: ServerThreadMessage): ThreadMessage {
+  const hasExtras = Boolean(message.outcome || message.action_proposal);
+  return {
+    id: message.message_id,
+    role: message.role,
+    content: message.content,
+    createdAt: message.created_at,
+    response: hasExtras
+      ? {
+          answer: message.content,
+          outcome: message.outcome ?? "answered",
+          citations: [],
+          tool_calls: [],
+          action_proposal: message.action_proposal,
+          trace_id: "",
+        }
+      : undefined,
+  };
+}
+
 function outcomeTone(outcome: string): string {
   switch (outcome) {
     case "action_proposed":
@@ -78,7 +102,9 @@ function outcomeTone(outcome: string): string {
 export function ChatThread() {
   const { user } = useAuth();
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [hydrating, setHydrating] = useState(true);
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -88,7 +114,38 @@ export function ChatThread() {
     if (!user) {
       return;
     }
-    setMessages(readThread(user.employeeId));
+    const employeeId = user.employeeId;
+    const token = user.demoToken;
+    let cancelled = false;
+    setMessages(readThread(employeeId));
+    setConversationId(readConversationId(employeeId));
+    setHydrating(true);
+    apiRequest<ConversationPayload>("GET", API_PATHS.currentConversation, token)
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        const next = payload.messages.map(toThreadMessage);
+        setMessages(next);
+        setConversationId(payload.conversation_id);
+        writeThread(employeeId, next);
+        writeConversationId(employeeId, payload.conversation_id);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        const detail = error instanceof Error ? error.message : "Could not load the saved conversation.";
+        toast.error(detail);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHydrating(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -101,14 +158,16 @@ export function ChatThread() {
 
   const session = user;
 
-  function persist(next: ThreadMessage[]) {
+  function persist(next: ThreadMessage[], nextConversationId: string | null = conversationId) {
     setMessages(next);
+    setConversationId(nextConversationId);
     writeThread(session.employeeId, next);
+    writeConversationId(session.employeeId, nextConversationId);
   }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || sending) {
+    if (!trimmed || sending || hydrating) {
       return;
     }
     const userMessage: ThreadMessage = {
@@ -126,7 +185,10 @@ export function ChatThread() {
         "POST",
         API_PATHS.chat,
         session.demoToken,
-        { message: trimmed },
+        {
+          message: trimmed,
+          ...(conversationId ? { conversation_id: conversationId } : {}),
+        },
       );
       const assistantMessage: ThreadMessage = {
         id: newId(),
@@ -135,7 +197,7 @@ export function ChatThread() {
         createdAt: new Date().toISOString(),
         response: result,
       };
-      persist([...withUser, assistantMessage]);
+      persist([...withUser, assistantMessage], result.conversation_id ?? conversationId);
     } catch (error) {
       const detail =
         error instanceof ApiError
@@ -150,7 +212,7 @@ export function ChatThread() {
         content: `Could not complete that request: ${detail}`,
         createdAt: new Date().toISOString(),
       };
-      persist([...withUser, assistantMessage]);
+      persist([...withUser, assistantMessage], conversationId);
     } finally {
       setSending(false);
       composerRef.current?.focus();
@@ -179,7 +241,25 @@ export function ChatThread() {
     }
   }
 
-  const canSend = Boolean(draft.trim()) && !sending;
+  async function startNewChat() {
+    if (sending || hydrating) {
+      return;
+    }
+    try {
+      const created = await apiRequest<ConversationPayload>(
+        "POST",
+        API_PATHS.conversations,
+        session.demoToken,
+      );
+      persist([], created.conversation_id);
+      setDraft("");
+      composerRef.current?.focus();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start a new chat.");
+    }
+  }
+
+  const canSend = Boolean(draft.trim()) && !sending && !hydrating;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
@@ -199,12 +279,26 @@ export function ChatThread() {
             How can I help with leave or policy?
           </h1>
           <p className="mt-1 hidden max-w-xl text-sm text-stone-500 sm:block">
-            Ask in one message with clear dates and leave type when you need a
-            proposal. Thread history stays in this browser only.
+            Follow-ups stay on this account. You can say next week, or correct a
+            typo. Leave is created only after Confirm.
           </p>
         </div>
-        <div className="hidden shrink-0 rounded-full border border-stone-200 bg-white/80 px-3 py-1.5 text-xs text-stone-500 lg:block">
-          Signed in as {session.displayName.split(" ")[0]}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="rounded-full"
+            disabled={sending || hydrating}
+            onClick={() => {
+              void startNewChat();
+            }}
+          >
+            New chat
+          </Button>
+          <div className="hidden rounded-full border border-stone-200 bg-white/80 px-3 py-1.5 text-xs text-stone-500 lg:block">
+            Signed in as {session.displayName.split(" ")[0]}
+          </div>
         </div>
       </header>
 
@@ -390,9 +484,11 @@ function AssistantExtras({
         >
           {response.outcome.replaceAll("_", " ")}
         </span>
-        <Badge variant="outline" className="font-mono text-[10px]">
-          {response.trace_id}
-        </Badge>
+        {response.trace_id ? (
+          <Badge variant="outline" className="font-mono text-[10px]">
+            {response.trace_id}
+          </Badge>
+        ) : null}
       </div>
 
       {response.citations?.length ? (
