@@ -185,9 +185,9 @@ export function ChatThread() {
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-white/55 to-transparent" />
 
-      <header className="relative z-10 flex items-end justify-between gap-4 border-b border-stone-200/70 px-6 py-4 backdrop-blur-sm">
+      <header className="relative z-10 flex items-end justify-between gap-3 border-b border-stone-200/70 px-4 py-3 backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-4">
         <div className="min-w-0">
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-1 hidden items-center gap-2 md:flex">
             <span className="inline-flex size-7 items-center justify-center rounded-full bg-teal-800 text-white shadow-sm">
               <Sparkles className="size-3.5" />
             </span>
@@ -195,28 +195,28 @@ export function ChatThread() {
               Assistant
             </p>
           </div>
-          <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">
+          <h1 className="text-lg font-semibold tracking-tight text-stone-900 sm:text-xl md:text-2xl">
             How can I help with leave or policy?
           </h1>
-          <p className="mt-1 max-w-xl text-sm text-stone-500">
+          <p className="mt-1 hidden max-w-xl text-sm text-stone-500 sm:block">
             Ask in one message with clear dates and leave type when you need a
             proposal. Thread history stays in this browser only.
           </p>
         </div>
-        <div className="hidden shrink-0 rounded-full border border-stone-200 bg-white/80 px-3 py-1.5 text-xs text-stone-500 sm:block">
+        <div className="hidden shrink-0 rounded-full border border-stone-200 bg-white/80 px-3 py-1.5 text-xs text-stone-500 lg:block">
           Signed in as {session.displayName.split(" ")[0]}
         </div>
       </header>
 
-      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 sm:gap-5">
           {messages.length === 0 ? (
-            <div className="chat-rise flex flex-col items-center gap-6 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl border border-teal-700/15 bg-white/80 shadow-[0_12px_40px_-24px_oklch(0.4_0.08_200)]">
-                <BookOpen className="size-6 text-teal-800" />
+            <div className="chat-rise flex flex-col items-center gap-5 py-8 text-center sm:gap-6 sm:py-12">
+              <div className="flex size-12 items-center justify-center rounded-2xl border border-teal-700/15 bg-white/80 shadow-[0_12px_40px_-24px_oklch(0.4_0.08_200)] sm:size-14">
+                <BookOpen className="size-5 text-teal-800 sm:size-6" />
               </div>
-              <div className="max-w-md">
-                <p className="text-lg font-medium tracking-tight text-stone-900">
+              <div className="max-w-md px-1">
+                <p className="text-base font-medium tracking-tight text-stone-900 sm:text-lg">
                   Start a policy or leave conversation
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-stone-500">
@@ -233,7 +233,7 @@ export function ChatThread() {
                       setDraft(example.prompt);
                       composerRef.current?.focus();
                     }}
-                    className="rounded-2xl border border-stone-200/90 bg-white/85 px-4 py-3 text-left shadow-sm transition-[transform,opacity,background-color] duration-200 ease-out hover:bg-white active:scale-[0.98] sm:max-w-[15rem]"
+                    className="w-full rounded-2xl border border-stone-200/90 bg-white/85 px-4 py-3 text-left shadow-sm transition-[transform,opacity,background-color] duration-200 ease-out hover:bg-white active:scale-[0.98] sm:w-auto sm:max-w-[15rem]"
                   >
                     <p className="text-sm font-medium text-stone-800">
                       {example.label}
@@ -259,19 +259,19 @@ export function ChatThread() {
                 style={{ animationDelay: `${Math.min(index, 6) * 20}ms` }}
               >
                 {!isUser ? (
-                  <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white">
+                  <div className="mt-1 hidden size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white sm:flex">
                     HR
                   </div>
                 ) : null}
                 <div
                   className={cn(
-                    "flex max-w-[min(100%,36rem)] flex-col gap-1.5",
+                    "flex min-w-0 max-w-[min(100%,36rem)] flex-1 flex-col gap-1.5 sm:flex-none",
                     isUser && "items-end",
                   )}
                 >
                   <div
                     className={cn(
-                      "px-4 py-3 text-[15px] leading-relaxed shadow-sm",
+                      "px-3.5 py-2.5 text-[15px] leading-relaxed shadow-sm sm:px-4 sm:py-3",
                       isUser
                         ? "rounded-[1.35rem] rounded-br-md bg-stone-900 text-stone-50"
                         : "rounded-[1.35rem] rounded-bl-md border border-stone-200/80 bg-white/90 text-stone-800",
@@ -294,7 +294,7 @@ export function ChatThread() {
                   </p>
                 </div>
                 {isUser ? (
-                  <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[11px] font-semibold text-stone-700">
+                  <div className="mt-1 hidden size-8 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[11px] font-semibold text-stone-700 sm:flex">
                     {session.displayName.slice(0, 1).toUpperCase()}
                   </div>
                 ) : null}
@@ -304,7 +304,7 @@ export function ChatThread() {
 
           {sending ? (
             <div className="chat-rise flex items-start gap-3">
-              <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white">
+              <div className="mt-1 hidden size-8 shrink-0 items-center justify-center rounded-full bg-teal-800 text-[11px] font-semibold text-white sm:flex">
                 HR
               </div>
               <div className="rounded-[1.35rem] rounded-bl-md border border-stone-200/80 bg-white/90 px-4 py-3 shadow-sm">
@@ -320,7 +320,7 @@ export function ChatThread() {
         </div>
       </div>
 
-      <div className="relative z-10 border-t border-stone-200/70 bg-white/75 px-4 py-4 backdrop-blur-md sm:px-6">
+      <div className="relative z-10 border-t border-stone-200/70 bg-white/75 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:px-6 sm:py-4">
         <form
           className="mx-auto w-full max-w-3xl"
           onSubmit={(event) => {
@@ -328,14 +328,14 @@ export function ChatThread() {
             void sendMessage(draft);
           }}
         >
-          <div className="rounded-[1.5rem] border border-stone-200 bg-white p-2 shadow-[0_18px_50px_-30px_oklch(0.35_0.04_220)] transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-teal-700/30 focus-within:shadow-[0_18px_50px_-28px_oklch(0.45_0.06_190)]">
+          <div className="rounded-[1.25rem] border border-stone-200 bg-white p-2 shadow-[0_18px_50px_-30px_oklch(0.35_0.04_220)] transition-[border-color,box-shadow] duration-200 ease-out focus-within:border-teal-700/30 focus-within:shadow-[0_18px_50px_-28px_oklch(0.45_0.06_190)] sm:rounded-[1.5rem]">
             <Textarea
               ref={composerRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Message the HR assistant…"
               rows={2}
-              className="min-h-[4.5rem] resize-none border-0 bg-transparent px-3 py-2 text-[15px] shadow-none focus-visible:ring-0"
+              className="min-h-[3.75rem] resize-none border-0 bg-transparent px-3 py-2 text-[15px] shadow-none focus-visible:ring-0 sm:min-h-[4.5rem]"
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -343,15 +343,16 @@ export function ChatThread() {
                 }
               }}
             />
-            <div className="flex items-center justify-between gap-3 px-2 pb-1">
-              <p className="text-[11px] text-stone-400">
+            <div className="flex items-center justify-between gap-2 px-1 pb-0.5 sm:gap-3 sm:px-2 sm:pb-1">
+              <p className="hidden text-[11px] text-stone-400 sm:block">
                 Enter to send · Shift+Enter for a new line
               </p>
+              <p className="text-[11px] text-stone-400 sm:hidden">Enter to send</p>
               <Button
                 type="submit"
                 size="sm"
                 disabled={!canSend}
-                className="rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.97]"
+                className="shrink-0 rounded-full bg-teal-800 text-white hover:bg-teal-700 active:scale-[0.97]"
               >
                 {sending ? (
                   <LoaderCircle className="animate-spin" data-icon="inline-start" />

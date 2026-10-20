@@ -16,15 +16,20 @@ export function PageFrame({
   className?: string;
 }) {
   return (
-    <div className={cn("mx-auto flex w-full max-w-5xl flex-col gap-6", className)}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-5xl flex-col gap-4 sm:gap-6",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
         <div className="min-w-0">
           {eyebrow ? (
             <p className="mb-1 text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
               {eyebrow}
             </p>
           ) : null}
-          <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
+          <h1 className="text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">
             {title}
           </h1>
           {description ? (
@@ -33,7 +38,9 @@ export function PageFrame({
             </p>
           ) : null}
         </div>
-        {actions ? <div className="shrink-0">{actions}</div> : null}
+        {actions ? (
+          <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>
+        ) : null}
       </div>
       {children}
     </div>

@@ -50,17 +50,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="chat-surface flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="flex w-full max-w-md flex-col gap-5">
+    <div className="chat-surface flex min-h-svh items-center justify-center px-4 py-8 sm:py-10">
+      <div className="flex w-full max-w-md flex-col gap-4 sm:gap-5">
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="inline-flex size-12 items-center justify-center rounded-2xl bg-teal-800 text-white shadow-sm">
+          <span className="inline-flex size-11 items-center justify-center rounded-2xl bg-teal-800 text-white shadow-sm sm:size-12">
             <Sparkles className="size-5" />
           </span>
           <div>
             <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
               HR Assistant
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
+            <h1 className="mt-1 text-xl font-semibold tracking-tight text-stone-900 sm:text-2xl">
               Policy and Leave Assistant
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-stone-500">
@@ -69,7 +69,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="rounded-[1.5rem] border border-stone-200/90 bg-white/90 p-6 shadow-[0_24px_60px_-40px_oklch(0.35_0.04_220)]">
+        <div className="rounded-[1.35rem] border border-stone-200/90 bg-white/90 p-5 shadow-[0_24px_60px_-40px_oklch(0.35_0.04_220)] sm:rounded-[1.5rem] sm:p-6">
           <div className="mb-5">
             <h2 className="text-lg font-semibold text-stone-900">Sign in</h2>
             <p className="mt-1 text-sm text-stone-500">
