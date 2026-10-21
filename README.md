@@ -8,9 +8,11 @@ This repository is a portfolio product (API, agent, retrieval, UI, tests, Docker
 
 - Hybrid policy retrieval (lexical + vector + RRF + rerank) over versioned chunks
 - Bounded tool-calling agent with citation validation and abstention
+- Deterministic leave domain gates (annual notice, sick >2 BD docs-via-HR, balance, overlap) plus RAG for explanations
 - Identity from bearer token only (`get_my_leave_balance` has no employee id argument)
+- Server-persisted chat threads; in-chat redacted trace inspector
 - Confirm → `pending_manager_review` with idempotent replay
-- Next.js demo UI (sign-in, dashboard, chat thread, leave, people, policies, monitoring)
+- Next.js demo UI (sign-in, dashboard, chat, leave, people, policies, monitoring)
 - Offline tests, overlap regression, and a 15-case live evaluation runner
 
 ## Quick start (local)
@@ -33,7 +35,7 @@ cd web && yarn install && yarn dev
 
 UI: http://localhost:3000 · API: http://localhost:8000
 
-Demo sign-in (password `demo` for all): `alya@demo.local`, `bima@demo.local`, `admin@demo.local`. Chat history is browser-only; each send still posts a single message to the API.
+Demo sign-in (password `demo` for all): `alya@demo.local`, `bima@demo.local`, `admin@demo.local`. Chat threads are stored per employee in Postgres; New Chat starts a blank draft (empty threads stay out of the sidebar).
 
 ## Tests and evaluation
 
@@ -85,7 +87,7 @@ Build does not require an API key. Runtime reads credentials from `.env`. The AP
 | Bima (employee) | EMP-002 | `token-bima` |
 | Monitoring admin | ADM-001 | `token-admin` |
 
-Signing out and signing in as another demo user clears the previous chat. Identity is enforced on the server.
+Signing out and signing in as another demo user loads that employee’s own threads. Identity is enforced on the server.
 
 ## Deploy (Neon + Vercel)
 

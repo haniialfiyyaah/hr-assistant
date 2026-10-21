@@ -33,7 +33,7 @@ A **hard gate** is a rule that **must never fail**. In live evaluation, hard-gat
 | Next.js (`web/`) | Demo UI; talks to HTTP API via `/api/v1` rewrite | `:3000` |
 | FastAPI (`src/api.py`) | Auth, chat, confirm, monitoring | `:8000` |
 | Agent (`src/agent.py`) | Bounded tool loop + outcome gates | — |
-| Tools (`src/tools.py`) | Four tools (no approve) | — |
+| Tools (`src/tools.py`) | Five tools (no approve) | — |
 | Retrieval (`src/retrieval.py`) | Hybrid RAG | — |
 | Postgres + pgvector | Employees, balances, requests, policy chunks | Compose `postgres` |
 | Redis | Retrieval cache (degrades on failure) | Compose `redis` |
@@ -67,10 +67,12 @@ flowchart TB
   Tools --> RAG[search_hr_policy]
   Tools --> Bal[get_my_leave_balance]
   Tools --> Prep[prepare_leave_request]
+  Tools --> ConfirmTool[confirm_leave_request]
   Tools --> Ticket[create_hr_ticket]
   RAG --> Gate[Outcome gates]
   Bal --> Gate
   Prep --> Gate
+  ConfirmTool --> Gate
   Ticket --> Gate
   Agent -->|final text| Gate
   Gate --> Out[ChatResponse + redacted trace]
@@ -79,11 +81,13 @@ flowchart TB
 **Outcome gates (server-side):**
 
 - Citations must match documents retrieved on **this** run → otherwise abstain
-- Failed `prepare_leave_request` (e.g. past date) → abstain
+- Failed `prepare_leave_request` (past date, short annual notice, sick leave >2 business days, balance, overlap, …) → abstain (agent should explain the domain error; escalate with a ticket when policy requires HR docs)
 - Ungrounded free-form answer (no tools / no citations) → abstain
 - Successful ticket → `escalated`
 - Successful proposal → `action_proposed` (still no leave row)
 - Final answers are passed through `redact()`
+
+**Search vs prepare:** Before prepare, the agent should call `search_hr_policy` for that leave type and follow retrieved text for answers. `prepare_leave_request` still runs `domain.py` so a wrong tool call cannot create a proposal. System instructions do **not** restate numeric HR thresholds — those live in policy docs + domain.
 
 ### 4.2 Leave confirm (the only leave mutation)
 
@@ -203,7 +207,7 @@ Chunking happens only at seed. At chat time we retrieve stored chunks; we re-emb
 | Bima | EMP-002 | `token-bima` | Other employee; cross-user / IDOR checks |
 | Monitoring admin | ADM-001 | `token-admin` | Monitoring tab only — **no leave balances** |
 
-Switching persona in the UI clears chat and confirmation keys (`ui_contract.select_persona`). Identity is always enforced on the server from the bearer token, not from client-supplied employee ids.
+Chat threads are stored per employee in Postgres (sidebar history; empty drafts omitted). Switching persona uses that user’s threads. Identity is always enforced on the server from the bearer token, not from client-supplied employee ids.
 
 ---
 
@@ -213,10 +217,14 @@ Switching persona in the UI clears chat and confirmation keys (`ui_contract.sele
 | --- | --- | --- |
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | DB, cache, model, policy index |
-| POST | `/api/v1/chat` | Agent turn |
+| GET | `/api/v1/conversations` | List own threads (non-empty) |
+| GET | `/api/v1/conversations/current` | Current / latest thread |
+| GET | `/api/v1/conversations/{id}` | Load one thread |
+| POST | `/api/v1/conversations` | Start a blank draft thread |
+| POST | `/api/v1/chat` | Agent turn (threaded history) |
 | POST | `/api/v1/action-proposals/{id}/confirm` | Create pending leave (idempotent) |
 | GET | `/api/v1/leave-requests/me` | Own leave requests |
-| GET | `/api/v1/traces/{trace_id}` | Redacted trace for a run |
+| GET | `/api/v1/traces/{trace_id}` | Redacted trace for a run (UI inspector) |
 | GET | `/api/v1/monitoring/summary` | Aggregate metrics (admin) |
 | GET | `/api/v1/monitoring/alerts` | Active alerts (admin) |
 
@@ -224,16 +232,21 @@ UI paths are fixed in `ui_contract.API_PATHS`.
 
 ---
 
-## 7. Four tools (no approve)
+## 7. Five tools (no approve)
 
 | Tool | What it does | Side effect? |
 | --- | --- | --- |
 | `search_hr_policy` | Hybrid retrieval over policy chunks | Read-only (cache write OK) |
 | `get_my_leave_balance` | Balances for **authenticated** employee only | Read-only |
 | `prepare_leave_request` | Domain-validates and stores a **proposal** | Proposal only |
+| `confirm_leave_request` | Confirms a pending proposal after clear user agreement | Leave row `pending_manager_review` |
 | `create_hr_ticket` | Opens an HR ticket (summary redacted) | Ticket row |
 
-Domain rules in `src/domain.py` (no model calls): past dates, end before start, overlap, insufficient balance, business-day count.
+Domain rules in `src/domain.py` (no model calls):
+
+- Past start date; end before start; zero business days; overlap with active request; insufficient balance
+- **Annual** (`HR-LEAVE-001`): start at least **3** business days after today
+- **Sick** (`HR-LEAVE-002`): more than **2** consecutive business days → refuse prepare (docs via HR system, not chat)
 
 ---
 
@@ -298,23 +311,24 @@ Reports land in `outputs/` (gitignored).
 ## 11. Suggested learning order
 
 1. **Trust** — [architecture.md](architecture.md) trust table + bearer auth in `api.py`
-2. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py`
+2. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py` (search explains; domain refuses)
 3. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent.py`
-4. **Agent loop** — `SYSTEM_INSTRUCTIONS` and outcome gates in `agent.py`
-5. **Confirm** — confirm handler in `api.py` + idempotency
-6. **Eval** — `evaluation_cases.json` + `run_evaluation.py`
-7. **Delivery** — [demo.md](demo.md) Docker sequence
+4. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds)
+5. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency
+6. **Threads + traces** — conversations API + in-chat trace inspector
+7. **Eval** — `evaluation_cases.json` + `run_evaluation.py`
+8. **Delivery** — [demo.md](demo.md) Docker sequence
 
 ---
 
 ## 12. Demo walkthrough (aligned to flows)
 
-1. Alya → policy question → citations (flows 4.1 + 4.3)
+1. Alya → policy question → citations (flows 4.1 + 4.3); open trace inspector on the message
 2. Alya → leave balance → `get_my_leave_balance` only
-3. Alya → future leave range → Confirm → `pending_manager_review` (flow 4.2)
+3. Alya → annual leave with ≥3 business days’ notice → Confirm → `pending_manager_review` (flow 4.2)
 4. Confirm again → idempotent replay
-5. Past leave / unknown policy → abstain; medical phrasing → escalate + redact
+5. Short annual notice or sick leave >2 business days → prepare refused / escalate; past leave / unknown policy → abstain; medical phrasing → escalate + redact (no diagnosis)
 6. Ask for another employee’s balance → still own identity
-7. Monitoring admin → Monitoring tab (not leave balance)
+7. Monitoring admin → Monitoring tab (not leave balance); People is admin-only
 
 Full timing script: [demo.md](demo.md).
