@@ -65,9 +65,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         description=(
             "Validate and prepare a leave request proposal. "
             "Search leave submission policy for that leave type first when possible. "
-            "Domain validation may refuse the request (for example notice period or sick-leave "
-            "docs-via-HR rules); on failure, escalate with create_hr_ticket using a redacted "
-            "summary when appropriate — never collect a diagnosis. "
+            "Domain may refuse (for example annual notice period, balance, overlap). "
+            "Sick leave longer than two business days still prepares; the result includes "
+            "sick_docs_via_hr=required — then also call create_hr_ticket with a redacted "
+            "summary so documents go via the HR system, never collect a diagnosis. "
             "Does not create a leave request until the user confirms."
         ),
         properties={

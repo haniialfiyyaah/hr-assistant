@@ -5,13 +5,24 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from src.agent import AgentService
+from src.agent import AgentService, is_confirm_intent
 from src.api import create_app
 from src.cache import NullCache
 from src.contracts import ActionProposal, ModelToolCall, ModelTurn
 from src.repository import MemoryRepository
 from src.retrieval import RetrievalService
 from src.tools import ToolExecutor
+
+
+def test_disetujui_is_not_confirm_intent() -> None:
+    assert not is_confirm_intent(
+        "Saldo cuti orang tua saya 60 hari. Berarti durasi saya sudah disetujui?"
+    )
+    assert not is_confirm_intent("Apakah cuti saya sudah disetujui?")
+    assert is_confirm_intent("confirm")
+    assert is_confirm_intent("setuju")
+    assert is_confirm_intent("ya, saya setuju")
+    assert is_confirm_intent("please confirm the proposal")
 
 ALYA = {"Authorization": "Bearer token-alya"}
 
@@ -130,3 +141,31 @@ def test_chat_confirm_fallback_without_tool_call(
     assert body["outcome"] == "answered"
     assert "LR-" in body["answer"] or "pending_manager_review" in body["answer"]
     assert repository.list_leave_requests("EMP-001")
+
+
+def test_disetujui_question_does_not_auto_confirm_pending_proposal(
+    repository: MemoryRepository, settings
+) -> None:
+    _seed_proposal(repository)
+    conversation_id = repository.current_conversation_id("EMP-001")
+    provider = SilentConfirmProvider()
+    retrieval = RetrievalService(repository, provider, NullCache(), 0)
+    tools = ToolExecutor(repository, retrieval, settings)
+    agent = AgentService(repository, provider, tools, settings)
+    client = TestClient(
+        create_app(settings=settings, repository=repository, cache=NullCache(), agent=agent)
+    )
+
+    response = client.post(
+        "/api/v1/chat",
+        headers=ALYA,
+        json={
+            "message": (
+                "Saldo cuti orang tua saya 60 hari. Berarti durasi saya sudah disetujui?"
+            ),
+            "conversation_id": conversation_id,
+        },
+    )
+    assert response.status_code == 200
+    assert not repository.list_leave_requests("EMP-001")
+    assert "pending_manager_review" not in response.json()["answer"]

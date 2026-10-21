@@ -48,6 +48,18 @@ def repository() -> MemoryRepository:
             effective_date=date(2026, 1, 1),
             content="Pegawai hanya boleh melihat saldo dan permintaan miliknya sendiri.",
         ),
+        PolicyChunk(
+            chunk_id="chunk-sick-privacy",
+            document_id="HR-LEAVE-002",
+            title="Kebijakan Cuti Sakit",
+            section="Privasi",
+            version="1.4",
+            effective_date=date(2026, 1, 1),
+            content=(
+                "Asisten tidak boleh meminta atau menyimpan diagnosis. "
+                "Informasi medis rinci harus disampaikan melalui kanal HR yang disetujui."
+            ),
+        ),
     ]
     return repo
 
@@ -57,6 +69,7 @@ def client(repository: MemoryRepository, settings: Settings) -> TestClient:
     provider = DeterministicProvider()
     cache = NullCache()
     retrieval = RetrievalService(repository, provider, cache, 0)
+
     def frozen_today() -> date:
         return date(2026, 9, 23)
 
@@ -64,4 +77,3 @@ def client(repository: MemoryRepository, settings: Settings) -> TestClient:
     agent = AgentService(repository, provider, tools, settings, today_factory=frozen_today)
     app = create_app(settings=settings, repository=repository, cache=cache, agent=agent)
     return TestClient(app)
-

@@ -21,6 +21,18 @@ def test_redaction_covers_sensitive_patterns() -> None:
     assert "081234567890" not in value
     assert "ABCDEF123" not in value
     assert "diabetes" not in value
+    assert "[REDACTED_MEDICAL]" in value
+
+
+def test_redaction_keeps_policy_vocabulary() -> None:
+    """Bare policy words must stay readable in chat answers about HR-LEAVE-002."""
+    value = redact(
+        "Anda tidak boleh mengirim diagnosis di chat. "
+        "Informasi medis harus melalui kanal HR [HR-LEAVE-002]."
+    )
+    assert "diagnosis" in value
+    assert "medis" in value
+    assert "[REDACTED_MEDICAL]" not in value
 
 
 def test_balance_tool_has_no_cross_employee_argument(client) -> None:

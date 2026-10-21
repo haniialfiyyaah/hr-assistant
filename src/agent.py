@@ -1,4 +1,5 @@
 """Bounded tool-calling agent with citation validation and redacted traces."""
+
 from __future__ import annotations
 
 import json
@@ -37,12 +38,14 @@ Rules:
 - Ground policy answers in retrieved documents from the current run only.
 - Cite documents using [DOCUMENT_ID] markers that match retrieved results.
 - For any policy or benefit question, call search_hr_policy first. If nothing relevant is found, say you cannot answer (abstain). Do not invent policies.
+- If the user asks whether they may send, share, or store a diagnosis or other medical detail in chat, call search_hr_policy first (sick-leave privacy and/or employee privacy), cite retrieved documents, refuse to collect that detail, and do not answer from memory alone.
 - Identity comes from the server session. Never look up another employee's private data.
 - get_my_leave_balance has no employee_id argument; it always returns the signed-in user.
 - Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
 - prepare_leave_request only creates a proposal. Never approve leave. Humans approve.
-- Before prepare_leave_request, call search_hr_policy for leave submission rules for that leave type, and follow what the retrieved policy says. If prepare_leave_request fails, explain the domain error and do not invent a different rule. For sick leave, never ask for or store a diagnosis; when policy or domain requires docs via the HR system, escalate with create_hr_ticket using a redacted summary only.
-- When the user clearly confirms a pending proposal (confirm, yes, setuju, ya, or similar), call confirm_leave_request. Prefer the proposal_id from the trusted pending-proposal block.
+- Before prepare_leave_request, call search_hr_policy for leave submission rules for that leave type, and follow what the retrieved policy says. If prepare_leave_request fails, explain the domain error and do not invent a different rule. For sick leave, never ask for or store a diagnosis. If the prepare result validation_summary includes sick_docs_via_hr=required (sick leave longer than two business days), still keep the proposal, tell the user supporting documents must go through the HR system (not chat), and also call create_hr_ticket with a redacted summary only.
+- When the user clearly confirms a pending proposal (confirm, yes, setuju, ya, or similar), call confirm_leave_request. Prefer the proposal_id from the trusted pending-proposal block. Words like disetujui or questions about whether something is already approved are not confirmation — answer from policy or status; do not confirm or prepare.
+- Do not prepare leave for policy questions. If the user proposes WFH or remote work as a substitute for sick leave, search remote-work and sick-leave policy, refuse the substitution when the policy says so, and cite retrieved documents — do not offer to prepare leave unless they clearly ask to take sick leave.
 - Never prepare leave that starts in the past. If the date is invalid, refuse (abstain).
 - Do not repeat medical diagnoses, tokens, or other sensitive details from the user. Escalate with create_hr_ticket using a redacted summary when needed.
 - If evidence is missing, conflicting, or citations would be invalid, abstain or escalate.
@@ -105,14 +108,78 @@ _DEFAULT_LEAVE_CLARIFY = (
     "I can help prepare that leave. Which type do you need "
     "(annual, sick, or parental), and how many business days?"
 )
+_MEDICAL_PRIVACY_TERMS = (
+    "diagnosis",
+    "diagnosa",
+    "rincian medis",
+    "medical detail",
+    "informasi medis",
+    "info medis",
+    "data medis",
+)
+_MEDICAL_SHARE_CUES = (
+    "chat",
+    "kirim",
+    "send",
+    "share",
+    "simpan",
+    "save",
+    "store",
+    "di sini",
+    "in this",
+    "boleh",
+    "may i",
+    "can i",
+    "allowed",
+    "apakah",
+)
+# Prefer sick-leave privacy, then employee privacy, when backfilling citations.
+_MEDICAL_PRIVACY_DOC_IDS = ("HR-LEAVE-002", "HR-PRIV-001")
+
+
+def requires_medical_privacy_search(message: str) -> bool:
+    """True when the user asks about sharing diagnosis/medical detail via chat."""
+    text = message.casefold()
+    if not any(term in text for term in _MEDICAL_PRIVACY_TERMS):
+        return False
+    return any(cue in text for cue in _MEDICAL_SHARE_CUES)
+
+
+def medical_privacy_citations_from_retrieval(
+    retrieved_by_document: dict[str, dict[str, Any]],
+) -> list[Citation]:
+    """Build citations from retrieved sick/privacy docs when the model forgot markers."""
+    citations: list[Citation] = []
+    for doc_id in _MEDICAL_PRIVACY_DOC_IDS:
+        item = retrieved_by_document.get(doc_id)
+        if item is None:
+            continue
+        citations.append(
+            Citation(
+                document_id=doc_id,
+                title=str(item.get("title", doc_id)),
+                section=str(item.get("section", "")),
+                excerpt=str(item.get("content", ""))[:280],
+            )
+        )
+    return citations
 
 
 def is_confirm_intent(message: str) -> bool:
-    """Clear confirmation phrases. Bare 'yes' is left to the model with the pending block."""
+    """Clear confirmation phrases. Bare 'yes' is left to the model with the pending block.
+
+    Match whole words only so policy questions like "sudah disetujui?" do not
+    trigger the chat-confirm fallback (substring "setuju" inside "disetujui").
+    """
     text = message.strip().casefold()
-    if text in {"confirm", "setuju", "ok confirm", "yes confirm"}:
+    if text in {"confirm", "setuju", "ok confirm", "yes confirm", "ya confirm"}:
         return True
-    return "confirm" in text or "setuju" in text
+    if re.search(r"\bconfirm\b", text):
+        return True
+    # Indonesian: "setuju" as its own word, not inside disetujui / menyetujui.
+    if re.search(r"(?<![a-zà-ÿ])setuju(?![a-zà-ÿ])", text):
+        return True
+    return False
 
 
 def mentions_other_employee(message: str, auth: AuthContext, profiles: list[AuthContext]) -> bool:
@@ -140,9 +207,7 @@ def signed_in_balance_answer(display_name: str, balances: list[dict[str, Any]]) 
         if item.get("leave_type") is not None
     ]
     detail = ", ".join(parts) if parts else "no days on record"
-    return (
-        f"I can only show your balance. {display_name} has {detail}."
-    )
+    return f"I can only show your balance. {display_name} has {detail}."
 
 
 def message_is_leave_request(message: str) -> bool:
@@ -178,9 +243,7 @@ def leave_intake_still_open(history: list[dict[str, Any]]) -> bool:
     return True
 
 
-def is_leave_request_intent(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> bool:
+def is_leave_request_intent(message: str, history: list[dict[str, Any]] | None = None) -> bool:
     """True for a leave request, or while an unfinished leave request is open."""
     if message_is_leave_request(message):
         return True
@@ -276,9 +339,7 @@ class AgentService:
             owner = self.repository.conversation_owner(request.conversation_id)
             if owner != auth.employee_id:
                 raise ConversationNotFound(request.conversation_id)
-            history = self.repository.list_messages(
-                request.conversation_id, HISTORY_LIMIT
-            )
+            history = self.repository.list_messages(request.conversation_id, HISTORY_LIMIT)
             return request.conversation_id, history
         return self.repository.create_conversation(auth.employee_id), []
 
@@ -297,9 +358,7 @@ class AgentService:
         citations: list[Citation] = []
         conversation_id, history = self._bind_conversation(request, auth)
         leave_intake = is_leave_request_intent(request.message, history)
-        pending_proposal = resolve_pending_proposal(
-            self.repository, auth.employee_id, history
-        )
+        pending_proposal = resolve_pending_proposal(self.repository, auth.employee_id, history)
         balance_rows: list[dict[str, Any]] | None = None
         used_balance = False
         confirm_result: dict[str, Any] | None = None
@@ -338,9 +397,7 @@ class AgentService:
                 preview_text = redact((turn.text or "").strip())
                 if preview_text:
                     model_step["answer_preview"] = (
-                        preview_text
-                        if len(preview_text) <= 160
-                        else f"{preview_text[:157]}..."
+                        preview_text if len(preview_text) <= 160 else f"{preview_text[:157]}..."
                     )
                 steps.append(model_step)
 
@@ -365,9 +422,7 @@ class AgentService:
                         tool_started = time.perf_counter()
                         status: str = "ok"
                         try:
-                            result, proposal = self.tools.execute(
-                                call.name, call.arguments, auth
-                            )
+                            result, proposal = self.tools.execute(call.name, call.arguments, auth)
                             if proposal is not None:
                                 action_proposal = proposal
                             if call.name == "search_hr_policy" and isinstance(result, list):
@@ -433,12 +488,25 @@ class AgentService:
                 )
                 used_ticket = any(item.name == "create_hr_ticket" for item in tool_summaries)
 
+                needs_medical_privacy_search = requires_medical_privacy_search(
+                    request.message
+                )
+
                 if prepare_failed and action_proposal is None:
                     # Domain rejected the proposal (e.g. past start date); never report success.
                     outcome = Outcome.abstained
                     answer = (
                         answer
                         or "I cannot prepare that leave request because it failed validation."
+                    )
+                    citations = []
+                elif needs_medical_privacy_search and not searched and not used_ticket:
+                    # Privacy Q&A must be grounded; free-form "don't send diagnosis" is not enough.
+                    outcome = Outcome.abstained
+                    answer = (
+                        "I need grounded policy evidence before answering questions about "
+                        "sharing medical details in chat. Please ask again so I can search "
+                        "the sick-leave and privacy policies."
                     )
                     citations = []
                 elif cited_ids:
@@ -466,16 +534,36 @@ class AgentService:
                         else:
                             outcome = Outcome.answered
                 elif searched:
-                    # Policy path without valid citations must abstain.
-                    outcome = Outcome.abstained
-                    answer = (
-                        answer
-                        or "I could not find enough policy evidence to answer confidently."
+                    privacy_citations = medical_privacy_citations_from_retrieval(
+                        retrieved_by_document
                     )
-                    citations = []
+                    # Medical privacy: if search returned sick/privacy docs, keep the answer
+                    # and backfill citations when the model omitted [DOCUMENT_ID] markers.
+                    if needs_medical_privacy_search and privacy_citations and answer:
+                        citations = privacy_citations
+                        if privacy_citations[0].document_id not in cited_ids:
+                            answer = (
+                                f"{answer.rstrip()} [{privacy_citations[0].document_id}]"
+                            )
+                        if action_proposal is not None:
+                            outcome = Outcome.action_proposed
+                        elif used_ticket:
+                            outcome = Outcome.escalated
+                        else:
+                            outcome = Outcome.answered
+                    else:
+                        # Policy path without valid citations must abstain.
+                        outcome = Outcome.abstained
+                        answer = (
+                            answer
+                            or "I could not find enough policy evidence to answer confidently."
+                        )
+                        citations = []
                 elif action_proposal is not None:
                     outcome = Outcome.action_proposed
-                    answer = answer or "Leave proposal is ready. Confirm to create a pending request."
+                    answer = (
+                        answer or "Leave proposal is ready. Confirm to create a pending request."
+                    )
                 elif used_ticket:
                     outcome = Outcome.escalated
                     answer = answer or "An HR ticket was created for follow-up."
@@ -498,9 +586,7 @@ class AgentService:
                 elif answer:
                     # Free-form policy answers without tools/citations are not allowed.
                     outcome = Outcome.abstained
-                    answer = (
-                        "I do not have enough policy evidence to answer that question."
-                    )
+                    answer = "I do not have enough policy evidence to answer that question."
                 else:
                     outcome = Outcome.abstained
                     answer = "I could not complete that request."
@@ -527,9 +613,7 @@ class AgentService:
             error is None
             and action_proposal is None
             and balance_topic
-            and mentions_other_employee(
-                request.message, auth, self.repository.list_profiles()
-            )
+            and mentions_other_employee(request.message, auth, self.repository.list_profiles())
         ):
             if balance_rows is None:
                 balance_rows = [
@@ -583,10 +667,8 @@ class AgentService:
             and confirm_result is None
             and not tool_summaries
             and leave_intake
-            and (
-                outcome == Outcome.abstained
-                or not is_clarifying_question(answer)
-            )
+            and not requires_medical_privacy_search(request.message)
+            and (outcome == Outcome.abstained or not is_clarifying_question(answer))
         ):
             # Keep leave intakes moving when the model abstains or invents a non-question.
             answer = _DEFAULT_LEAVE_CLARIFY

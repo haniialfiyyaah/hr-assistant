@@ -8,7 +8,7 @@ This repository is a portfolio product (API, agent, retrieval, UI, tests, Docker
 
 - Hybrid policy retrieval (lexical + vector + RRF + rerank) over versioned chunks
 - Bounded tool-calling agent with citation validation and abstention
-- Deterministic leave domain gates (annual notice, sick >2 BD docs-via-HR, balance, overlap) plus RAG for explanations
+- Deterministic leave domain gates (annual notice, balance, overlap; sick >2 BD prepares + docs-via-HR flag) plus RAG for explanations
 - Identity from bearer token only (`get_my_leave_balance` has no employee id argument)
 - Server-persisted chat threads; in-chat redacted trace inspector
 - Confirm → `pending_manager_review` with idempotent replay

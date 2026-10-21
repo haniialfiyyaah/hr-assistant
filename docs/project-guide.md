@@ -81,7 +81,8 @@ flowchart TB
 **Outcome gates (server-side):**
 
 - Citations must match documents retrieved on **this** run → otherwise abstain
-- Failed `prepare_leave_request` (past date, short annual notice, sick leave >2 business days, balance, overlap, …) → abstain (agent should explain the domain error; escalate with a ticket when policy requires HR docs)
+- Failed `prepare_leave_request` (past date, short annual notice, balance, overlap, …) → abstain (explain the domain error)
+- Sick leave >2 business days → prepare still succeeds with `sick_docs_via_hr=required`; agent should also `create_hr_ticket` (redacted) for documents via HR, never collect diagnosis
 - Ungrounded free-form answer (no tools / no citations) → abstain
 - Successful ticket → `escalated`
 - Successful proposal → `action_proposed` (still no leave row)
@@ -246,7 +247,7 @@ Domain rules in `src/domain.py` (no model calls):
 
 - Past start date; end before start; zero business days; overlap with active request; insufficient balance
 - **Annual** (`HR-LEAVE-001`): start at least **3** business days after today
-- **Sick** (`HR-LEAVE-002`): more than **2** consecutive business days → refuse prepare (docs via HR system, not chat)
+- **Sick** (`HR-LEAVE-002`): more than **2** consecutive business days → prepare allowed; summary `sick_docs_via_hr=required` (docs via HR system / ticket, not chat)
 
 ---
 
@@ -327,7 +328,7 @@ Reports land in `outputs/` (gitignored).
 2. Alya → leave balance → `get_my_leave_balance` only
 3. Alya → annual leave with ≥3 business days’ notice → Confirm → `pending_manager_review` (flow 4.2)
 4. Confirm again → idempotent replay
-5. Short annual notice or sick leave >2 business days → prepare refused / escalate; past leave / unknown policy → abstain; medical phrasing → escalate + redact (no diagnosis)
+5. Short annual notice → prepare refused; sick leave >2 business days → prepare + ticket for docs (no diagnosis); past leave / unknown policy → abstain; medical phrasing → escalate + redact
 6. Ask for another employee’s balance → still own identity
 7. Monitoring admin → Monitoring tab (not leave balance); People is admin-only
 

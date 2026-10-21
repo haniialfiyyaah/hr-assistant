@@ -15,7 +15,7 @@ Product-facing risk notes for the HR Policy and Leave Assistant demo. Owners are
 | Evaluation drift vs live model | Medium | Medium | AI Platform | Fixed case set; GO/NO-GO thresholds; re-run before release | `src/run_evaluation.py`, outputs report |
 | Overlapping leave accepted | Medium | Medium | Domain | Overlap check against non-cancelled requests | `tests/test_overlap_regression.py` |
 | Domain thresholds drift from policy markdown | Medium | Medium | Domain / content | Keep `domain.py` constants aligned with `HR-LEAVE-001` / `HR-LEAVE-002`; prefer typed rules at seed later | Domain unit tests; architecture “search vs domain” note |
-| Model over-applies soft policy (e.g. blocks 1–2 day sick) | Medium | Medium | Agent | Prompt steers to retrieved policy + domain errors; domain allows ≤2 sick BD | Manual demo; domain tests for 2 vs 3 BD sick |
+| Model skips ticket when sick docs via HR are required | Medium | Medium | Agent | Domain flags `sick_docs_via_hr=required` on prepare; prompt steers ticket + no diagnosis | Domain unit tests; tool description |
 
 ## Out of scope for this demo
 

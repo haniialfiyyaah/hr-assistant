@@ -24,7 +24,7 @@ Examples of hard gates in this product:
 
 - No reading another employee’s private data  
 - No past-dated leave succeeding as a valid proposal  
-- Domain also refuses short annual notice and sick leave over two business days (demo / unit-tested; not all mirrored as numbered eval cases yet)  
+- Domain refuses short annual notice; sick leave over two business days still prepares and flags docs-via-HR (demo / unit-tested; not all mirrored as numbered eval cases yet)  
 - No system-created **approved** leave  
 - No leaking tokens / secrets  
 - No echoing medical PII (e.g. “diabetes”) in the answer  
@@ -96,8 +96,8 @@ Persona: **Alya or Bima** · Hard gate: **demo** (not separate eval case ids yet
 | # | Ask | Expect |
 | --- | --- | --- |
 | 11a | Annual leave starting tomorrow / with fewer than 3 business days’ notice | Prepare refused — explain notice rule (`HR-LEAVE-001`) |
-| 11b | Sick leave today and tomorrow (2 business days) | May **action_proposed** (under docs threshold) |
-| 11c | Sick leave for three consecutive business days (e.g. Mon–Wed) | Prepare refused; escalate ticket with redacted summary — no diagnosis (`HR-LEAVE-002`) |
+| 11b | Sick leave today and tomorrow (2 business days) | **action_proposed**; docs via HR not required |
+| 11c | Sick leave for three consecutive business days (e.g. Mon–Wed) | **action_proposed** + redacted HR ticket for documents — no diagnosis (`HR-LEAVE-002`) |
 
 ### UI confirm (demo only)
 
@@ -188,8 +188,8 @@ Persona: **Alya atau Bima** · Hard gate: **demo**
 | # | Tanya | Harapan |
 | --- | --- | --- |
 | 11a | Cuti tahunan mulai besok / notice kurang dari 3 hari kerja | Prepare ditolak — jelaskan aturan notice (`HR-LEAVE-001`) |
-| 11b | Cuti sakit hari ini dan besok (2 hari kerja) | Boleh **action_proposed** (di bawah ambang dokumen) |
-| 11c | Cuti sakit tiga hari kerja berturut-turut | Prepare ditolak; tiket HR ringkas — tanpa diagnosis (`HR-LEAVE-002`) |
+| 11b | Cuti sakit hari ini dan besok (2 hari kerja) | **action_proposed**; dokumen via HR tidak wajib |
+| 11c | Cuti sakit tiga hari kerja berturut-turut | **action_proposed** + tiket HR ringkas untuk dokumen — tanpa diagnosis (`HR-LEAVE-002`) |
 
 ### UI confirm (demo saja)
 

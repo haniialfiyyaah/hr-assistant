@@ -19,15 +19,22 @@ def stable_safety_id(employee_id: str) -> str:
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"(?:\+62|62|0)8\d{8,12}\b")
 _TOKEN_RE = re.compile(r"\btoken[-_][A-Za-z0-9_-]+\b", re.IGNORECASE)
-# Common medical detail / diagnosis cues for synthetic demo traces.
+# Personal medical disclosures for synthetic demo traces — not bare policy vocabulary.
+# Keep words like "diagnosis" / "medis" when explaining HR-LEAVE-002; scrub values and conditions.
 _MEDICAL_RE = re.compile(
-    r"\b(?:diabetes|diagnosis|diagnosa|penyakit|medical|medis)\b(?:\s*[:\-]\s*[A-Za-z0-9_-]+)?",
+    r"(?:"
+    r"\bdiabetes\b"
+    r"|"
+    r"\b(?:diagnosis|diagnosa|penyakit|medical|medis)\b\s*[:\-]\s*[A-Za-z0-9_-]+"
+    r"|"
+    r"\b(?:diagnosis|diagnosa)\s+diabetes\b"
+    r")",
     re.IGNORECASE,
 )
 
 
 def redact(value: str) -> str:
-    """Redact email, Indonesian phone numbers, token-like values, and medical detail."""
+    """Redact email, Indonesian phone numbers, token-like values, and personal medical detail."""
     redacted = _EMAIL_RE.sub("[REDACTED_EMAIL]", value)
     redacted = _PHONE_RE.sub("[REDACTED_PHONE]", redacted)
     redacted = _TOKEN_RE.sub("[REDACTED_TOKEN]", redacted)

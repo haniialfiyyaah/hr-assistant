@@ -62,7 +62,7 @@ def test_annual_leave_allows_start_on_third_business_day() -> None:
 
 
 def test_sick_leave_up_to_two_business_days_is_allowed() -> None:
-    # Mon–Tue = 2 BD → under docs threshold
+    # Mon–Tue = 2 BD → prepare OK; docs via HR not required
     args = PrepareLeaveArgs(
         start_date=date(2026, 9, 28),
         end_date=date(2026, 9, 29),
@@ -76,24 +76,25 @@ def test_sick_leave_up_to_two_business_days_is_allowed() -> None:
         date(2026, 9, 23),
     )
     assert days == 2
-    assert "sick_docs_threshold_business_days<=2" in summary
+    assert "sick_docs_via_hr=not_required" in summary
 
 
-def test_sick_leave_over_two_business_days_is_blocked() -> None:
-    # Mon–Wed = 3 BD → docs must go through HR system
+def test_sick_leave_over_two_business_days_prepares_with_docs_flag() -> None:
+    # Mon–Wed = 3 BD → prepare OK; flag docs via HR system (not chat)
     args = PrepareLeaveArgs(
         start_date=date(2026, 9, 28),
         end_date=date(2026, 9, 30),
         leave_type="sick",
         reason=None,
     )
-    with pytest.raises(DomainError, match="dokumen pendukung"):
-        validate_leave_request(
-            args,
-            [LeaveBalance(leave_type="sick", available_days=10, as_of_date=date(2026, 1, 1))],
-            False,
-            date(2026, 9, 23),
-        )
+    days, summary = validate_leave_request(
+        args,
+        [LeaveBalance(leave_type="sick", available_days=10, as_of_date=date(2026, 1, 1))],
+        False,
+        date(2026, 9, 23),
+    )
+    assert days == 3
+    assert "sick_docs_via_hr=required" in summary
 
 
 def test_insufficient_balance_and_overlap_are_blocked() -> None:

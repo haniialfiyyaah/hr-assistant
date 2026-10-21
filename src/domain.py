@@ -68,17 +68,6 @@ def validate_leave_request(
 
     days = business_days(args.start_date, args.end_date)
 
-    # Sick leave >2 consecutive business days: supporting docs via HR system, not chat.
-    if (
-        args.leave_type == "sick"
-        and days > SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS
-    ):
-        raise DomainError(
-            "Cuti sakit lebih dari dua hari kerja memerlukan dokumen pendukung "
-            "melalui sistem HR, bukan melalui asisten. Ajukan tiket HR tanpa "
-            "menyebut diagnosis."
-        )
-
     available = next(
         (item.available_days for item in balances if item.leave_type == args.leave_type),
         0,
@@ -94,10 +83,12 @@ def validate_leave_request(
     ]
     if args.leave_type == "annual":
         summary.append(f"notice_business_days>={ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS}")
+    # HR-LEAVE-002: prepare is allowed; supporting docs go via HR system (not chat).
     if args.leave_type == "sick":
-        summary.append(
-            f"sick_docs_threshold_business_days<={SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS}"
-        )
+        if days > SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS:
+            summary.append("sick_docs_via_hr=required")
+        else:
+            summary.append("sick_docs_via_hr=not_required")
     return days, summary
 
 
