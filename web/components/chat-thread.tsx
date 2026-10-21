@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   LoaderCircle,
   Sparkles,
+  Ticket,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +19,14 @@ import { ChatMarkdown } from "@/components/chat-markdown";
 import { TraceInspector } from "@/components/trace-inspector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal";
 import { Textarea } from "@/components/ui/textarea";
 import {
   apiRequest,
@@ -28,14 +37,18 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  getIdempotencyKey,
   readThread,
   writeConversationId,
   writeThread,
   type ChatResponsePayload,
+  type ChatTicketProposal,
   type ConversationPayload,
   type ServerThreadMessage,
   type ThreadMessage,
 } from "@/lib/session";
+
+const TICKET_SUMMARY_PREVIEW_CHARS = 120;
 
 const EXAMPLES = [
   {
@@ -72,7 +85,10 @@ function formatTime(iso: string): string {
 
 function toThreadMessage(message: ServerThreadMessage): ThreadMessage {
   const hasExtras = Boolean(
-    message.outcome || message.action_proposal || message.trace_id,
+    message.outcome ||
+      message.action_proposal ||
+      message.ticket_proposal ||
+      message.trace_id,
   );
   return {
     id: message.message_id,
@@ -86,6 +102,7 @@ function toThreadMessage(message: ServerThreadMessage): ThreadMessage {
           citations: [],
           tool_calls: [],
           action_proposal: message.action_proposal,
+          ticket_proposal: message.ticket_proposal ?? null,
           trace_id: message.trace_id ?? "",
         }
       : undefined,
@@ -299,6 +316,62 @@ export function ChatThread() {
     void sendMessage("confirm");
   }
 
+  async function confirmTicketProposal(proposalId: string) {
+    if (!user || sending) {
+      return;
+    }
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      const result = await apiRequest<{
+        ticket_id: string;
+        status: string;
+      }>("POST", API_PATHS.confirmTicket(proposalId), user.demoToken, {
+        idempotency_key: getIdempotencyKey(proposalId, user.employeeId),
+      });
+      toast.success(`Ticket ${result.ticket_id} opened`);
+      const activeId = conversationIdRef.current;
+      if (activeId) {
+        const payload = await apiRequest<ConversationPayload>(
+          "GET",
+          API_PATHS.conversation(activeId),
+          user.demoToken,
+        );
+        const next = payload.messages.map(toThreadMessage);
+        setMessages(next);
+        writeThread(user.employeeId, next);
+      } else {
+        setMessages(prev =>
+          prev.map(message => {
+            if (!message.response?.ticket_proposal) {
+              return message;
+            }
+            if (message.response.ticket_proposal.proposal_id !== proposalId) {
+              return message;
+            }
+            return {
+              ...message,
+              response: {
+                ...message.response,
+                ticket_proposal: null,
+                outcome: "escalated",
+              },
+            };
+          }),
+        );
+      }
+    } catch (error: unknown) {
+      const detail =
+        error instanceof ApiError || error instanceof Error
+          ? error.message
+          : "Could not confirm ticket";
+      toast.error(detail);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+
   function startNewChat() {
     if (sending || hydrating) {
       return;
@@ -427,6 +500,9 @@ export function ChatThread() {
                         response={message.response}
                         confirming={sending}
                         onConfirm={confirmFromChat}
+                        onConfirmTicket={proposalId => {
+                          void confirmTicketProposal(proposalId);
+                        }}
                       />
                     ) : null}
                   </div>
@@ -520,13 +596,16 @@ function AssistantExtras({
   response,
   confirming,
   onConfirm,
+  onConfirmTicket,
 }: {
   response: ChatResponsePayload;
   confirming: boolean;
   onConfirm: () => void;
+  onConfirmTicket: (proposalId: string) => void;
 }) {
   const [traceOpen, setTraceOpen] = useState(false);
   const proposal = response.action_proposal;
+  const ticketProposal = response.ticket_proposal;
   return (
     <div className="mt-4 flex flex-col gap-3 border-t border-stone-200/80 pt-3 text-stone-800">
       <div className="flex flex-wrap gap-2">
@@ -672,6 +751,138 @@ function AssistantExtras({
           </div>
         </div>
       ) : null}
+
+      {ticketProposal ? (
+        <TicketProposalCard
+          ticketProposal={ticketProposal}
+          confirming={confirming}
+          onConfirmTicket={onConfirmTicket}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function truncateTicketSummary(summary: string): {
+  preview: string;
+  truncated: boolean;
+} {
+  const normalized = summary.trim();
+  if (normalized.length <= TICKET_SUMMARY_PREVIEW_CHARS) {
+    return { preview: normalized, truncated: false };
+  }
+  return {
+    preview: `${normalized.slice(0, TICKET_SUMMARY_PREVIEW_CHARS).trimEnd()}…`,
+    truncated: true,
+  };
+}
+
+function TicketProposalCard({
+  ticketProposal,
+  confirming,
+  onConfirmTicket,
+}: {
+  ticketProposal: ChatTicketProposal;
+  confirming: boolean;
+  onConfirmTicket: (proposalId: string) => void;
+}) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const { preview, truncated } = truncateTicketSummary(ticketProposal.summary);
+
+  return (
+    <>
+      <div className="overflow-hidden rounded-2xl border border-amber-800/15 bg-gradient-to-br from-amber-50 to-white">
+        <div className="flex items-start gap-2 border-b border-amber-800/10 px-4 py-3">
+          <Ticket className="mt-0.5 size-4 text-amber-900" />
+          <div>
+            <p className="text-sm font-medium text-amber-950">
+              HR ticket proposal ready
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-amber-900/70">
+              Not opened yet. Confirm to create the ticket for this account.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 px-4 py-3 text-sm">
+          <div>
+            <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+              Category
+            </p>
+            <p className="mt-0.5 font-medium capitalize">
+              {ticketProposal.category.replaceAll("_", " ")}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+              Summary
+            </p>
+            <p className="mt-0.5 leading-relaxed text-stone-800">{preview}</p>
+            <button
+              type="button"
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                setDetailOpen(true);
+              }}
+              className="mt-1.5 text-[12px] font-medium text-amber-900 outline-none hover:underline focus-visible:underline"
+            >
+              {truncated ? "Show more" : "View detail"}
+            </button>
+          </div>
+        </div>
+        <div className="px-4 pb-4">
+          <Button
+            type="button"
+            className="w-full rounded-full bg-amber-900 text-white hover:bg-amber-800 active:scale-[0.98] sm:w-auto"
+            size="sm"
+            disabled={confirming}
+            onClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              onConfirmTicket(ticketProposal.proposal_id);
+            }}
+          >
+            {confirming ? (
+              <LoaderCircle
+                className="animate-spin"
+                data-icon="inline-start"
+              />
+            ) : (
+              <CheckCircle2 data-icon="inline-start" />
+            )}
+            {confirming ? "Confirming…" : "Confirm open HR ticket"}
+          </Button>
+        </div>
+      </div>
+
+      <Modal open={detailOpen} onOpenChange={setDetailOpen}>
+        <ModalContent>
+          <ModalHeader>
+            <ModalTitle>Ticket proposal</ModalTitle>
+            <ModalDescription className="font-mono text-xs">
+              {ticketProposal.proposal_id}
+            </ModalDescription>
+          </ModalHeader>
+          <ModalBody className="flex flex-col gap-4">
+            <div>
+              <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+                Category
+              </p>
+              <p className="mt-1 text-sm capitalize text-stone-800">
+                {ticketProposal.category.replaceAll("_", " ")}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] tracking-wide text-stone-500 uppercase">
+                Summary
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-800">
+                {ticketProposal.summary}
+              </p>
+            </div>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+    </>
   );
 }

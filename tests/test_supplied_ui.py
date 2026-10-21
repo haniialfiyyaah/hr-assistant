@@ -22,4 +22,9 @@ def test_persona_change_clears_prior_response_and_confirmation_key() -> None:
 def test_supplied_ui_uses_documented_api_paths() -> None:
     assert API_PATHS["chat"] == "/api/v1/chat"
     assert API_PATHS["confirm"].format(proposal_id="AP-1") == "/api/v1/action-proposals/AP-1/confirm"
+    assert (
+        API_PATHS["confirm_ticket"].format(proposal_id="TP-1")
+        == "/api/v1/ticket-proposals/TP-1/confirm"
+    )
+    assert API_PATHS["my_tickets"] == "/api/v1/hr-tickets/me"
 

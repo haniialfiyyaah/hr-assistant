@@ -27,6 +27,9 @@ from .contracts import (
     LeaveRequestView,
     ProblemDetail,
     ThreadMessageView,
+    TicketProposal,
+    TicketResult,
+    TicketView,
 )
 from .providers import DeterministicProvider, OpenAIProvider
 from .repository import (
@@ -153,12 +156,31 @@ def create_app(
         }
 
     def visible_proposal(employee_id: str, proposal_id: str | None) -> ActionProposal | None:
-        """Return a proposal the employee can still confirm."""
+        """Return a leave proposal the employee can still confirm."""
         if not proposal_id:
             return None
         if repository.proposal_request_id(proposal_id):
             return None
         found = repository.get_proposal(proposal_id)
+        if found is None or found[0] != employee_id:
+            return None
+        proposal = found[1]
+        expires_at = proposal.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            return None
+        return proposal
+
+    def visible_ticket_proposal(
+        employee_id: str, proposal_id: str | None
+    ) -> TicketProposal | None:
+        """Return a ticket proposal the employee can still confirm."""
+        if not proposal_id:
+            return None
+        if repository.ticket_proposal_ticket_id(proposal_id):
+            return None
+        found = repository.get_ticket_proposal(proposal_id)
         if found is None or found[0] != employee_id:
             return None
         proposal = found[1]
@@ -181,6 +203,9 @@ def create_app(
                 created_at=row["created_at"],
                 outcome=row.get("outcome"),
                 action_proposal=visible_proposal(employee_id, row.get("proposal_id")),
+                ticket_proposal=visible_ticket_proposal(
+                    employee_id, row.get("ticket_proposal_id")
+                ),
                 trace_id=str(row["trace_id"]) if row.get("trace_id") else None,
             )
             for row in rows
@@ -241,11 +266,33 @@ def create_app(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post(
+        "/api/v1/ticket-proposals/{proposal_id}/confirm",
+        response_model=TicketResult,
+    )
+    def confirm_ticket_proposal(
+        proposal_id: str,
+        body: ConfirmActionRequest,
+        auth: AuthContext = Depends(require_auth),
+    ) -> TicketResult:
+        try:
+            return repository.confirm_ticket_proposal(
+                auth.employee_id, proposal_id, body.idempotency_key
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Ticket proposal not found.") from exc
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/v1/leave-requests/me", response_model=list[LeaveRequestView])
     def my_leave_requests(
         auth: AuthContext = Depends(require_auth),
     ) -> list[LeaveRequestView]:
         return repository.list_leave_requests(auth.employee_id)
+
+    @app.get("/api/v1/hr-tickets/me", response_model=list[TicketView])
+    def my_hr_tickets(auth: AuthContext = Depends(require_auth)) -> list[TicketView]:
+        return repository.list_tickets(auth.employee_id)
 
     @app.get("/api/v1/traces/{trace_id}")
     def get_trace(trace_id: str, auth: AuthContext = Depends(require_auth)) -> dict[str, Any]:

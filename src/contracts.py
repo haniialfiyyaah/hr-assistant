@@ -59,6 +59,17 @@ class ActionProposal(BaseModel):
     requires_confirmation: Literal[True] = True
 
 
+class TicketProposal(BaseModel):
+    """Pending HR ticket — not opened until the user confirms."""
+
+    proposal_id: str
+    action_type: Literal["hr_ticket"] = "hr_ticket"
+    category: Literal["policy_question", "leave_exception", "technical_issue", "privacy"]
+    summary: str = Field(min_length=5, max_length=500)
+    expires_at: datetime
+    requires_confirmation: Literal[True] = True
+
+
 class UsageSummary(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
@@ -72,6 +83,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     tool_calls: list[ToolCallSummary] = Field(default_factory=list)
     action_proposal: ActionProposal | None = None
+    ticket_proposal: TicketProposal | None = None
     trace_id: str
     usage: UsageSummary
     conversation_id: str | None = None
@@ -86,6 +98,7 @@ class ThreadMessageView(BaseModel):
     created_at: datetime
     outcome: str | None = None
     action_proposal: ActionProposal | None = None
+    ticket_proposal: TicketProposal | None = None
     trace_id: str | None = None
 
 
@@ -115,12 +128,27 @@ class ActionResult(BaseModel):
     audit_reference: str
 
 
+class TicketResult(BaseModel):
+    ticket_id: str
+    status: Literal["open"] = "open"
+    idempotent_replay: bool
+    audit_reference: str
+
+
 class LeaveRequestView(BaseModel):
     request_id: str
     leave_type: str
     start_date: date
     end_date: date
     business_days: int
+    status: str
+    created_at: datetime
+
+
+class TicketView(BaseModel):
+    ticket_id: str
+    category: str
+    summary: str
     status: str
     created_at: datetime
 
@@ -153,6 +181,12 @@ class PrepareLeaveArgs(BaseModel):
 
 class ConfirmLeaveArgs(BaseModel):
     """Confirm a pending leave proposal. Null uses the latest open proposal for this user."""
+
+    proposal_id: str | None = Field(default=None, max_length=100)
+
+
+class ConfirmTicketArgs(BaseModel):
+    """Confirm a pending ticket proposal. Null uses the latest open ticket proposal."""
 
     proposal_id: str | None = Field(default=None, max_length=100)
 

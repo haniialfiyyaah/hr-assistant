@@ -9,7 +9,9 @@ from pathlib import Path
 API_PATHS = {
     "chat": "/api/v1/chat",
     "confirm": "/api/v1/action-proposals/{proposal_id}/confirm",
+    "confirm_ticket": "/api/v1/ticket-proposals/{proposal_id}/confirm",
     "my_requests": "/api/v1/leave-requests/me",
+    "my_tickets": "/api/v1/hr-tickets/me",
     "monitoring_summary": "/api/v1/monitoring/summary",
     "monitoring_alerts": "/api/v1/monitoring/alerts",
 }

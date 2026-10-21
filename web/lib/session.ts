@@ -67,12 +67,20 @@ export interface ChatProposal {
   validation_summary?: string[];
 }
 
+export interface ChatTicketProposal {
+  proposal_id: string;
+  category: string;
+  summary: string;
+  expires_at?: string;
+}
+
 export interface ChatResponsePayload {
   answer: string;
   outcome: string;
   citations: ChatCitation[];
   tool_calls: ChatToolCall[];
   action_proposal: ChatProposal | null;
+  ticket_proposal?: ChatTicketProposal | null;
   trace_id: string;
   conversation_id?: string | null;
 }
@@ -84,6 +92,7 @@ export interface ServerThreadMessage {
   created_at: string;
   outcome: string | null;
   action_proposal: ChatProposal | null;
+  ticket_proposal?: ChatTicketProposal | null;
   trace_id?: string | null;
 }
 

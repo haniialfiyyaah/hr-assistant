@@ -14,6 +14,9 @@ from .contracts import (
     LeaveBalance,
     LeaveRequestView,
     PolicyChunk,
+    TicketProposal,
+    TicketResult,
+    TicketView,
 )
 from .security import token_hash
 
@@ -35,6 +38,14 @@ class Repository(Protocol):
     def latest_open_proposal(self, employee_id: str) -> ActionProposal | None: ...
     def confirm_proposal(self, employee_id: str, proposal_id: str, idempotency_key: str) -> ActionResult: ...
     def list_leave_requests(self, employee_id: str) -> list[LeaveRequestView]: ...
+    def save_ticket_proposal(self, employee_id: str, proposal: TicketProposal) -> None: ...
+    def get_ticket_proposal(self, proposal_id: str) -> tuple[str, TicketProposal] | None: ...
+    def ticket_proposal_ticket_id(self, proposal_id: str) -> str | None: ...
+    def latest_open_ticket_proposal(self, employee_id: str) -> TicketProposal | None: ...
+    def confirm_ticket_proposal(
+        self, employee_id: str, proposal_id: str, idempotency_key: str
+    ) -> TicketResult: ...
+    def list_tickets(self, employee_id: str) -> list[TicketView]: ...
     def create_ticket(self, employee_id: str, category: str, summary: str) -> str: ...
     def save_trace(self, trace: dict[str, Any]) -> None: ...
     def get_trace(self, trace_id: str) -> dict[str, Any] | None: ...
@@ -51,6 +62,7 @@ class Repository(Protocol):
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        ticket_proposal_id: str | None = None,
         trace_id: str | None = None,
     ) -> str: ...
 
@@ -72,6 +84,7 @@ class MemoryRepository:
         self._balances: dict[str, list[LeaveBalance]] = {}
         self._proposals: dict[str, dict[str, Any]] = {}
         self._requests: list[dict[str, Any]] = []
+        self._ticket_proposals: dict[str, dict[str, Any]] = {}
         self._tickets: list[dict[str, Any]] = []
         self._traces: dict[str, dict[str, Any]] = {}
         self._conversations: dict[str, dict[str, Any]] = {}
@@ -246,6 +259,95 @@ class MemoryRepository:
             if row["employee_id"] == employee_id
         ]
 
+    def save_ticket_proposal(self, employee_id: str, proposal: TicketProposal) -> None:
+        self._ticket_proposals[proposal.proposal_id] = {
+            "employee_id": employee_id,
+            "proposal": proposal,
+            "ticket_id": None,
+            "idempotency_key": None,
+            "audit_reference": None,
+        }
+
+    def get_ticket_proposal(self, proposal_id: str) -> tuple[str, TicketProposal] | None:
+        row = self._ticket_proposals.get(proposal_id)
+        if row is None:
+            return None
+        return row["employee_id"], row["proposal"]
+
+    def ticket_proposal_ticket_id(self, proposal_id: str) -> str | None:
+        row = self._ticket_proposals.get(proposal_id)
+        if row is None:
+            return None
+        ticket_id = row.get("ticket_id")
+        return str(ticket_id) if ticket_id else None
+
+    def latest_open_ticket_proposal(self, employee_id: str) -> TicketProposal | None:
+        now = datetime.now(timezone.utc)
+        open_items: list[TicketProposal] = []
+        for row in self._ticket_proposals.values():
+            if row["employee_id"] != employee_id or row.get("ticket_id"):
+                continue
+            proposal: TicketProposal = row["proposal"]
+            expires_at = proposal.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < now:
+                continue
+            open_items.append(proposal)
+        if not open_items:
+            return None
+        open_items.sort(key=lambda item: item.expires_at, reverse=True)
+        return open_items[0]
+
+    def confirm_ticket_proposal(
+        self, employee_id: str, proposal_id: str, idempotency_key: str
+    ) -> TicketResult:
+        row = self._ticket_proposals.get(proposal_id)
+        if row is None or row["employee_id"] != employee_id:
+            raise KeyError(proposal_id)
+
+        proposal: TicketProposal = row["proposal"]
+        expires_at = proposal.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            raise ConflictError("ticket proposal expired")
+
+        if row["ticket_id"] is not None:
+            if row["idempotency_key"] == idempotency_key:
+                return TicketResult(
+                    ticket_id=row["ticket_id"],
+                    status="open",
+                    idempotent_replay=True,
+                    audit_reference=row["audit_reference"],
+                )
+            raise ConflictError("idempotency key conflict")
+
+        ticket_id = self.create_ticket(employee_id, proposal.category, proposal.summary)
+        audit_reference = f"AUD-{uuid.uuid4().hex[:10].upper()}"
+        row["ticket_id"] = ticket_id
+        row["idempotency_key"] = idempotency_key
+        row["audit_reference"] = audit_reference
+        return TicketResult(
+            ticket_id=ticket_id,
+            status="open",
+            idempotent_replay=False,
+            audit_reference=audit_reference,
+        )
+
+    def list_tickets(self, employee_id: str) -> list[TicketView]:
+        return [
+            TicketView(
+                ticket_id=row["ticket_id"],
+                category=row["category"],
+                summary=row["summary"],
+                status=row.get("status") or "open",
+                created_at=row["created_at"],
+            )
+            for row in self._tickets
+            if row["employee_id"] == employee_id
+        ]
+
     def create_ticket(self, employee_id: str, category: str, summary: str) -> str:
         ticket_id = f"TKT-{uuid.uuid4().hex[:10].upper()}"
         self._tickets.append(
@@ -254,6 +356,7 @@ class MemoryRepository:
                 "employee_id": employee_id,
                 "category": category,
                 "summary": summary,
+                "status": "open",
                 "created_at": datetime.now(timezone.utc),
             }
         )
@@ -358,6 +461,7 @@ class MemoryRepository:
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        ticket_proposal_id: str | None = None,
         trace_id: str | None = None,
     ) -> str:
         row = self._conversations.get(conversation_id)
@@ -373,6 +477,7 @@ class MemoryRepository:
                 "content": content,
                 "outcome": outcome,
                 "proposal_id": proposal_id,
+                "ticket_proposal_id": ticket_proposal_id,
                 "trace_id": trace_id,
                 "created_at": now,
                 "seq": self._message_seq,
@@ -765,6 +870,183 @@ class PostgresRepository:
             for row in rows
         ]
 
+    def save_ticket_proposal(self, employee_id: str, proposal: TicketProposal) -> None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO ticket_proposals (
+                        proposal_id, employee_id, category, summary, expires_at
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (proposal_id) DO UPDATE SET
+                        employee_id = EXCLUDED.employee_id,
+                        category = EXCLUDED.category,
+                        summary = EXCLUDED.summary,
+                        expires_at = EXCLUDED.expires_at
+                    """,
+                    (
+                        proposal.proposal_id,
+                        employee_id,
+                        proposal.category,
+                        proposal.summary,
+                        proposal.expires_at,
+                    ),
+                )
+
+    def get_ticket_proposal(self, proposal_id: str) -> tuple[str, TicketProposal] | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT employee_id, proposal_id, category, summary, expires_at
+                    FROM ticket_proposals
+                    WHERE proposal_id = %s
+                    """,
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return row[0], TicketProposal(
+            proposal_id=row[1],
+            category=row[2],
+            summary=row[3],
+            expires_at=row[4],
+        )
+
+    def ticket_proposal_ticket_id(self, proposal_id: str) -> str | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT ticket_id FROM ticket_proposals WHERE proposal_id = %s",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
+    def latest_open_ticket_proposal(self, employee_id: str) -> TicketProposal | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT proposal_id, category, summary, expires_at
+                    FROM ticket_proposals
+                    WHERE employee_id = %s
+                      AND ticket_id IS NULL
+                      AND expires_at > NOW()
+                    ORDER BY expires_at DESC
+                    LIMIT 1
+                    """,
+                    (employee_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return TicketProposal(
+            proposal_id=row[0],
+            category=row[1],
+            summary=row[2],
+            expires_at=row[3],
+        )
+
+    def confirm_ticket_proposal(
+        self, employee_id: str, proposal_id: str, idempotency_key: str
+    ) -> TicketResult:
+        with self.pool.connection() as conn:
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT employee_id, category, summary, expires_at,
+                               idempotency_key, ticket_id, audit_reference
+                        FROM ticket_proposals
+                        WHERE proposal_id = %s
+                        FOR UPDATE
+                        """,
+                        (proposal_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None or row[0] != employee_id:
+                        raise KeyError(proposal_id)
+
+                    expires_at = row[3]
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at < datetime.now(timezone.utc):
+                        raise ConflictError("ticket proposal expired")
+
+                    existing_key, existing_ticket, existing_audit = row[4], row[5], row[6]
+                    if existing_ticket is not None:
+                        if existing_key == idempotency_key:
+                            conn.commit()
+                            return TicketResult(
+                                ticket_id=existing_ticket,
+                                status="open",
+                                idempotent_replay=True,
+                                audit_reference=existing_audit,
+                            )
+                        raise ConflictError("idempotency key conflict")
+
+                    ticket_id = f"TKT-{uuid.uuid4().hex[:10].upper()}"
+                    audit_reference = f"AUD-{uuid.uuid4().hex[:10].upper()}"
+                    cur.execute(
+                        """
+                        INSERT INTO hr_tickets (ticket_id, employee_id, category, summary)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (ticket_id, employee_id, row[1], row[2]),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE ticket_proposals
+                        SET idempotency_key = %s,
+                            ticket_id = %s,
+                            audit_reference = %s
+                        WHERE proposal_id = %s
+                        """,
+                        (idempotency_key, ticket_id, audit_reference, proposal_id),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.autocommit = True
+
+        return TicketResult(
+            ticket_id=ticket_id,
+            status="open",
+            idempotent_replay=False,
+            audit_reference=audit_reference,
+        )
+
+    def list_tickets(self, employee_id: str) -> list[TicketView]:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ticket_id, category, summary, created_at
+                    FROM hr_tickets
+                    WHERE employee_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (employee_id,),
+                )
+                rows = cur.fetchall()
+        return [
+            TicketView(
+                ticket_id=row[0],
+                category=row[1],
+                summary=row[2],
+                status="open",
+                created_at=row[3],
+            )
+            for row in rows
+        ]
+
     def create_ticket(self, employee_id: str, category: str, summary: str) -> str:
         ticket_id = f"TKT-{uuid.uuid4().hex[:10].upper()}"
         with self.pool.connection() as conn:
@@ -922,10 +1204,11 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT message_id, role, content, outcome, proposal_id, trace_id, created_at
+                    SELECT message_id, role, content, outcome, proposal_id,
+                           ticket_proposal_id, trace_id, created_at
                     FROM (
-                        SELECT message_id, role, content, outcome, proposal_id, trace_id,
-                               created_at, seq
+                        SELECT message_id, role, content, outcome, proposal_id,
+                               ticket_proposal_id, trace_id, created_at, seq
                         FROM conversation_messages
                         WHERE conversation_id = %s
                         ORDER BY seq DESC
@@ -943,8 +1226,9 @@ class PostgresRepository:
                 "content": row[2],
                 "outcome": row[3],
                 "proposal_id": row[4],
-                "trace_id": row[5],
-                "created_at": row[6],
+                "ticket_proposal_id": row[5],
+                "trace_id": row[6],
+                "created_at": row[7],
             }
             for row in rows
         ]
@@ -956,6 +1240,7 @@ class PostgresRepository:
         content: str,
         outcome: str | None = None,
         proposal_id: str | None = None,
+        ticket_proposal_id: str | None = None,
         trace_id: str | None = None,
     ) -> str:
         message_id = f"MSG-{uuid.uuid4().hex[:12].upper()}"
@@ -972,9 +1257,9 @@ class PostgresRepository:
                     """
                     INSERT INTO conversation_messages (
                         message_id, conversation_id, role, content, outcome,
-                        proposal_id, trace_id, created_at
+                        proposal_id, ticket_proposal_id, trace_id, created_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         message_id,
@@ -983,6 +1268,7 @@ class PostgresRepository:
                         content,
                         outcome,
                         proposal_id,
+                        ticket_proposal_id,
                         trace_id,
                         now,
                     ),

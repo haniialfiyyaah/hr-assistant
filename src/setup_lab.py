@@ -125,6 +125,18 @@ def _schema_sql(embedding_dimensions: int) -> str:
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS ticket_proposals (
+        proposal_id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL REFERENCES employees(employee_id),
+        category TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        idempotency_key TEXT,
+        ticket_id TEXT REFERENCES hr_tickets(ticket_id),
+        audit_reference TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS policy_chunks (
         chunk_id TEXT PRIMARY KEY,
         document_id TEXT NOT NULL,
@@ -169,6 +181,7 @@ def _schema_sql(embedding_dimensions: int) -> str:
         content TEXT NOT NULL,
         outcome TEXT,
         proposal_id TEXT,
+        ticket_proposal_id TEXT,
         trace_id TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         seq BIGINT GENERATED ALWAYS AS IDENTITY
@@ -184,6 +197,19 @@ def _migrate_sql() -> str:
     return """
     ALTER TABLE conversation_messages
         ADD COLUMN IF NOT EXISTS trace_id TEXT;
+    ALTER TABLE conversation_messages
+        ADD COLUMN IF NOT EXISTS ticket_proposal_id TEXT;
+    CREATE TABLE IF NOT EXISTS ticket_proposals (
+        proposal_id TEXT PRIMARY KEY,
+        employee_id TEXT NOT NULL REFERENCES employees(employee_id),
+        category TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        idempotency_key TEXT,
+        ticket_id TEXT REFERENCES hr_tickets(ticket_id),
+        audit_reference TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     """
 
 
@@ -193,6 +219,7 @@ def _drop_schema_sql() -> str:
     DROP TABLE IF EXISTS conversations CASCADE;
     DROP TABLE IF EXISTS traces CASCADE;
     DROP TABLE IF EXISTS policy_chunks CASCADE;
+    DROP TABLE IF EXISTS ticket_proposals CASCADE;
     DROP TABLE IF EXISTS hr_tickets CASCADE;
     DROP TABLE IF EXISTS action_proposals CASCADE;
     DROP TABLE IF EXISTS leave_requests CASCADE;

@@ -14,6 +14,7 @@ import {
   Menu,
   MessageSquare,
   Sparkles,
+  Ticket,
   Users,
 } from "lucide-react";
 
@@ -41,7 +42,7 @@ const NAV: {
 }[] = [
   {
     href: "/",
-    label: "Chat",
+    label: "New Chat",
     icon: MessageSquare,
     roles: ["employee", "monitoring_admin"],
   },
@@ -55,6 +56,12 @@ const NAV: {
     href: "/leave",
     label: "Leave",
     icon: CalendarDays,
+    roles: ["employee", "monitoring_admin"],
+  },
+  {
+    href: "/tickets",
+    label: "Tickets",
+    icon: Ticket,
     roles: ["employee", "monitoring_admin"],
   },
   {

@@ -319,8 +319,12 @@ def test_medical_detail_is_redacted_from_answer(repository: MemoryRepository) ->
         ChatRequest(message="Diagnosis: diabetes. Simpan ke trace."),
         AuthContext(employee_id="EMP-001", display_name="Alya"),
     )
-    assert response.outcome == "escalated"
+    # Ticket is proposed first; diagnosis stays redacted until/after confirm.
+    assert response.outcome == "action_proposed"
+    assert response.ticket_proposal is not None
     assert "diabetes" not in response.answer.lower()
+    assert "diabetes" not in response.ticket_proposal.summary.lower()
+    assert repository.list_tickets("EMP-001") == []
 
 
 def test_policy_chunk_ids_and_metadata_are_stable() -> None:

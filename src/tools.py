@@ -12,9 +12,11 @@ from .contracts import (
     ActionProposal,
     AuthContext,
     ConfirmLeaveArgs,
+    ConfirmTicketArgs,
     PrepareLeaveArgs,
     SearchPolicyArgs,
     TicketArgs,
+    TicketProposal,
 )
 from .domain import DomainError, validate_leave_request
 from .repository import ConflictError, Repository
@@ -68,7 +70,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "Domain may refuse (for example annual notice period, balance, overlap). "
             "Sick leave longer than two business days still prepares; the result includes "
             "sick_docs_via_hr=required — then also call create_hr_ticket with a redacted "
-            "summary so documents go via the HR system, never collect a diagnosis. "
+            "summary so documents go via the HR system after the user confirms the ticket, "
+            "never collect a diagnosis. "
             "Does not create a leave request until the user confirms."
         ),
         properties={
@@ -103,7 +106,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _function_schema(
         name="create_hr_ticket",
-        description="Open an HR support ticket for escalation or exceptions.",
+        description=(
+            "Prepare an HR support ticket proposal for escalation or exceptions. "
+            "Does not open the ticket until the user confirms "
+            "(confirm_hr_ticket or the UI confirm button)."
+        ),
         properties={
             "category": {
                 "type": "string",
@@ -112,6 +119,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "summary": {"type": "string", "minLength": 5, "maxLength": 500},
         },
         required=["category", "summary"],
+    ),
+    _function_schema(
+        name="confirm_hr_ticket",
+        description=(
+            "Confirm a pending HR ticket proposal after the user clearly agrees "
+            "(for example confirm, yes, setuju, or ya). Opens the ticket as status open."
+        ),
+        properties={
+            "proposal_id": {
+                "type": ["string", "null"],
+                "description": (
+                    "Proposal id from the pending ticket proposal, or null for the latest open one."
+                ),
+            },
+        },
+        required=["proposal_id"],
     ),
 ]
 
@@ -131,7 +154,7 @@ class ToolExecutor:
 
     def execute(
         self, name: str, arguments: dict[str, Any], auth: AuthContext
-    ) -> tuple[Any, ActionProposal | None]:
+    ) -> tuple[Any, ActionProposal | TicketProposal | None]:
         """Run one tool. Private data always uses auth.employee_id from the bearer token."""
         if name == "search_hr_policy":
             args = SearchPolicyArgs.model_validate(arguments)
@@ -209,9 +232,36 @@ class ToolExecutor:
             from .security import redact
 
             args = TicketArgs.model_validate(arguments)
-            ticket_id = self.repository.create_ticket(
-                auth.employee_id, args.category, redact(args.summary)
+            proposal = TicketProposal(
+                proposal_id=f"TP-{uuid.uuid4().hex[:12].upper()}",
+                category=args.category,
+                summary=redact(args.summary),
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(minutes=self.settings.proposal_ttl_minutes),
             )
-            return {"ticket_id": ticket_id, "status": "open"}, None
+            self.repository.save_ticket_proposal(auth.employee_id, proposal)
+            return proposal.model_dump(mode="json"), proposal
+
+        if name == "confirm_hr_ticket":
+            args = ConfirmTicketArgs.model_validate(arguments)
+            proposal_id = args.proposal_id
+            if not proposal_id:
+                latest = self.repository.latest_open_ticket_proposal(auth.employee_id)
+                if latest is None:
+                    raise DomainError("No pending HR ticket proposal to confirm.")
+                proposal_id = latest.proposal_id
+            found = self.repository.get_ticket_proposal(proposal_id)
+            if found is None or found[0] != auth.employee_id:
+                raise DomainError("Pending HR ticket proposal not found.")
+            idempotency_key = f"confirm-{auth.employee_id}-{proposal_id}"
+            try:
+                result = self.repository.confirm_ticket_proposal(
+                    auth.employee_id, proposal_id, idempotency_key
+                )
+            except KeyError as exc:
+                raise DomainError("Pending HR ticket proposal not found.") from exc
+            except ConflictError as exc:
+                raise DomainError(str(exc)) from exc
+            return result.model_dump(mode="json"), None
 
         raise DomainError(f"Unknown tool: {name}")

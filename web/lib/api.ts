@@ -9,7 +9,10 @@ export const API_PATHS = {
     `/api/v1/conversations/${conversationId}`,
   confirm: (proposalId: string) =>
     `/api/v1/action-proposals/${proposalId}/confirm`,
+  confirmTicket: (proposalId: string) =>
+    `/api/v1/ticket-proposals/${proposalId}/confirm`,
   myRequests: "/api/v1/leave-requests/me",
+  myTickets: "/api/v1/hr-tickets/me",
   monitoringSummary: "/api/v1/monitoring/summary",
   monitoringAlerts: "/api/v1/monitoring/alerts",
   trace: (traceId: string) => `/api/v1/traces/${traceId}`,
