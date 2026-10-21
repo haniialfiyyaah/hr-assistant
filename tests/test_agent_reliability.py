@@ -145,6 +145,9 @@ def test_ungrounded_answer_is_abstained(repository: MemoryRepository) -> None:
         AuthContext(employee_id="EMP-001", display_name="Alya"),
     )
     assert response.outcome == "abstained"
+    # Keep the model text in chat; do not swap in a generic English wall.
+    assert "Mars" in response.answer
+    assert response.citations == []
 
 
 class LeaveClarifyProvider:

@@ -39,6 +39,8 @@ Rules:
 - Cite documents using [DOCUMENT_ID] markers that match retrieved results.
 - For any policy or benefit question, call search_hr_policy first. If nothing relevant is found, say you cannot answer (abstain). Do not invent policies.
 - If the user asks whether they may send, share, or store a diagnosis or other medical detail in chat, call search_hr_policy first (sick-leave privacy and/or employee privacy), cite retrieved documents, refuse to collect that detail, and do not answer from memory alone.
+- "Cuti orang tua" / parental leave is a leave type for the signed-in employee — not another person's balance. Do not refuse as cross-employee access.
+- If the user asks whether leave duration or eligibility is already approved (for example saldo parental 60 days → "sudah disetujui?"), call search_hr_policy first (parental / leave policy), cite retrieved documents, and explain that a recorded balance is not approval — HR decides final duration. Do not confirm or prepare from that question alone.
 - Identity comes from the server session. Never look up another employee's private data.
 - get_my_leave_balance has no employee_id argument; it always returns the signed-in user.
 - Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
@@ -135,6 +137,26 @@ _MEDICAL_SHARE_CUES = (
 )
 # Prefer sick-leave privacy, then employee privacy, when backfilling citations.
 _MEDICAL_PRIVACY_DOC_IDS = ("HR-LEAVE-002", "HR-PRIV-001")
+_LEAVE_DECISION_DOC_IDS = ("HR-LEAVE-003", "HR-LEAVE-001")
+_LEAVE_DECISION_CUES = (
+    "disetujui",
+    "sudah approve",
+    "already approved",
+    "berarti durasi",
+    "durasi saya",
+    "final duration",
+    "kelayakan",
+)
+_LEAVE_DECISION_LEAVE_CUES = (
+    "cuti",
+    "leave",
+    "parental",
+    "orang tua",
+    "tahunan",
+    "annual",
+    "sakit",
+    "sick",
+)
 
 
 def requires_medical_privacy_search(message: str) -> bool:
@@ -145,12 +167,21 @@ def requires_medical_privacy_search(message: str) -> bool:
     return any(cue in text for cue in _MEDICAL_SHARE_CUES)
 
 
-def medical_privacy_citations_from_retrieval(
+def requires_leave_decision_policy_search(message: str) -> bool:
+    """True when asking if leave duration/eligibility is already approved."""
+    text = message.casefold()
+    if not any(cue in text for cue in _LEAVE_DECISION_CUES):
+        return False
+    return any(cue in text for cue in _LEAVE_DECISION_LEAVE_CUES)
+
+
+def citations_from_retrieval(
     retrieved_by_document: dict[str, dict[str, Any]],
+    document_ids: tuple[str, ...],
 ) -> list[Citation]:
-    """Build citations from retrieved sick/privacy docs when the model forgot markers."""
+    """Build citations for preferred document ids present in this run's retrieval."""
     citations: list[Citation] = []
-    for doc_id in _MEDICAL_PRIVACY_DOC_IDS:
+    for doc_id in document_ids:
         item = retrieved_by_document.get(doc_id)
         if item is None:
             continue
@@ -163,6 +194,13 @@ def medical_privacy_citations_from_retrieval(
             )
         )
     return citations
+
+
+def medical_privacy_citations_from_retrieval(
+    retrieved_by_document: dict[str, dict[str, Any]],
+) -> list[Citation]:
+    """Build citations from retrieved sick/privacy docs when the model forgot markers."""
+    return citations_from_retrieval(retrieved_by_document, _MEDICAL_PRIVACY_DOC_IDS)
 
 
 def is_confirm_intent(message: str) -> bool:
@@ -491,6 +529,9 @@ class AgentService:
                 needs_medical_privacy_search = requires_medical_privacy_search(
                     request.message
                 )
+                needs_leave_decision_search = requires_leave_decision_policy_search(
+                    request.message
+                )
 
                 if prepare_failed and action_proposal is None:
                     # Domain rejected the proposal (e.g. past start date); never report success.
@@ -507,6 +548,15 @@ class AgentService:
                         "I need grounded policy evidence before answering questions about "
                         "sharing medical details in chat. Please ask again so I can search "
                         "the sick-leave and privacy policies."
+                    )
+                    citations = []
+                elif needs_leave_decision_search and not searched and not used_ticket:
+                    # "Sudah disetujui?" needs parental/leave policy — not free-form or confirm.
+                    outcome = Outcome.abstained
+                    answer = (
+                        "I need grounded policy evidence before answering whether leave "
+                        "duration or eligibility is already approved. Please ask again so "
+                        "I can search the leave policy."
                     )
                     citations = []
                 elif cited_ids:
@@ -537,14 +587,19 @@ class AgentService:
                     privacy_citations = medical_privacy_citations_from_retrieval(
                         retrieved_by_document
                     )
-                    # Medical privacy: if search returned sick/privacy docs, keep the answer
-                    # and backfill citations when the model omitted [DOCUMENT_ID] markers.
+                    decision_citations = citations_from_retrieval(
+                        retrieved_by_document, _LEAVE_DECISION_DOC_IDS
+                    )
+                    # Backfill citations when search found the right docs but markers were omitted.
+                    backfill: list[Citation] = []
                     if needs_medical_privacy_search and privacy_citations and answer:
-                        citations = privacy_citations
-                        if privacy_citations[0].document_id not in cited_ids:
-                            answer = (
-                                f"{answer.rstrip()} [{privacy_citations[0].document_id}]"
-                            )
+                        backfill = privacy_citations
+                    elif needs_leave_decision_search and decision_citations and answer:
+                        backfill = decision_citations
+                    if backfill:
+                        citations = backfill
+                        if backfill[0].document_id not in cited_ids:
+                            answer = f"{answer.rstrip()} [{backfill[0].document_id}]"
                         if action_proposal is not None:
                             outcome = Outcome.action_proposed
                         elif used_ticket:
@@ -584,9 +639,10 @@ class AgentService:
                     outcome = Outcome.answered
                     citations = []
                 elif answer:
-                    # Free-form policy answers without tools/citations are not allowed.
+                    # Ungrounded free-form: keep the model text for UX, but do not treat it
+                    # as a grounded policy answer (no citations, outcome abstained).
                     outcome = Outcome.abstained
-                    answer = "I do not have enough policy evidence to answer that question."
+                    citations = []
                 else:
                     outcome = Outcome.abstained
                     answer = "I could not complete that request."

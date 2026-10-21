@@ -60,6 +60,18 @@ def repository() -> MemoryRepository:
                 "Informasi medis rinci harus disampaikan melalui kanal HR yang disetujui."
             ),
         ),
+        PolicyChunk(
+            chunk_id="chunk-parental",
+            document_id="HR-LEAVE-003",
+            title="Kebijakan Cuti Orang Tua",
+            section="Proses",
+            version="1.2",
+            effective_date=date(2026, 1, 1),
+            content=(
+                "Asisten hanya boleh menyiapkan permintaan dan membuat tiket konsultasi. "
+                "Keputusan kelayakan dan durasi akhir selalu dilakukan manusia dari tim HR."
+            ),
+        ),
     ]
     return repo
 
