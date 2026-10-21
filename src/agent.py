@@ -7,10 +7,10 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from .calendar import calendar_brief, today_in_jakarta
+from .calendar import calendar_brief, first_business_days, today_in_jakarta
 from .config import Settings
 from .contracts import (
     ActionProposal,
@@ -22,7 +22,12 @@ from .contracts import (
     ToolCallSummary,
     UsageSummary,
 )
-from .domain import DomainError, estimate_cost
+from .domain import (
+    ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS,
+    DomainError,
+    add_business_days,
+    estimate_cost,
+)
 from .providers import ModelProvider
 from .repository import ConflictError, ConversationNotFound, Repository
 from .security import redact, stable_safety_id
@@ -45,7 +50,7 @@ Rules:
 - get_my_leave_balance has no employee_id argument; it always returns the signed-in user.
 - Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
 - prepare_leave_request only creates a proposal. Never approve leave. Humans approve.
-- Before prepare_leave_request, call search_hr_policy for leave submission rules for that leave type, and follow what the retrieved policy says. If prepare_leave_request fails, explain the domain error and do not invent a different rule. For sick leave, never ask for or store a diagnosis. If the prepare result validation_summary includes sick_docs_via_hr=required (sick leave longer than two business days), still keep the proposal, tell the user supporting documents must go through the HR system (not chat), and also call create_hr_ticket with a redacted summary only.
+- Before prepare_leave_request, call search_hr_policy for leave submission rules for that leave type, and follow what the retrieved policy says. If prepare_leave_request fails, explain the domain error and do not invent a different rule. Never tell the user that annual-leave notice is too short unless prepare_leave_request failed with that domain error on this turn — if start/end dates are known, call prepare and trust the tool. For sick leave, never ask for or store a diagnosis. If the prepare result validation_summary includes sick_docs_via_hr=required (sick leave longer than two business days), still keep the proposal, tell the user supporting documents must go through the HR system (not chat), and also call create_hr_ticket with a redacted summary only.
 - When the user clearly confirms a pending proposal (confirm, yes, setuju, ya, or similar), call confirm_leave_request. Prefer the proposal_id from the trusted pending-proposal block. Words like disetujui or questions about whether something is already approved are not confirmation — answer from policy or status; do not confirm or prepare.
 - Do not prepare leave for policy questions. If the user proposes WFH or remote work as a substitute for sick leave, search remote-work and sick-leave policy, refuse the substitution when the policy says so, and cite retrieved documents — do not offer to prepare leave unless they clearly ask to take sick leave.
 - Never prepare leave that starts in the past. If the date is invalid, refuse (abstain).
@@ -55,6 +60,7 @@ Rules:
 - Match the language of the user's latest message. If they write in English, reply in English. If they write in Indonesian, reply in Indonesian. Keep citations and document ids unchanged even when the policy text is Indonesian.
 - A trusted calendar block states today, tomorrow, this week, this Friday, next week, next Friday, and example ranges. Use those only to resolve relative phrases the user actually said. Do not invent a different week.
 - Never assume or invent start_date or end_date. Do not default to "the next two business days", "hari kerja berikutnya", or the calendar's first-two-business-days example unless the user asked for that (for example "two days next week"). If dates are missing, ask for them and do not call prepare_leave_request.
+- During leave intake, if the user later gives only a day number (for example "28" or "29"), treat it as the start date only — not a one-day leave. Use that day in the current calendar month if it is on or after today, otherwise the same day next month. Ask how many business days next; do not call prepare_leave_request until duration is known.
 - Never invent a reason. Only pass reason when the user stated one (this message or earlier turns). Phrases like "for holiday", "liburan", "family trip", or "urusan keluarga" are enough when they said them. If they gave no reason, pass reason=null — do not invent "personal", "keperluan pribadi", or similar.
 - Read clear misspellings as the intended words, including anual/annual, nxt week/next week, parantal/parental, minggu depan/next week, and besok/tomorrow.
 - If the user gives a duration and a relative week, including across earlier turns, call prepare_leave_request with the first that many Monday-Friday days of that week. Say those ISO dates in the answer.
@@ -124,6 +130,19 @@ _LOOSE_DATE_RE = re.compile(
     r"|\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*"
     r"\s+\d{1,2}\b",
     re.IGNORECASE,
+)
+# With unit: always duration. Bare digits: duration only after a start date is known.
+_DURATION_RE = re.compile(
+    r"^\s*(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)\s*$",
+    re.IGNORECASE,
+)
+_BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2})\s*$")
+_NOTICE_FAILURE_CUES = (
+    "tiga hari kerja",
+    "three business day",
+    "tidak memenuhi",
+    "does not meet",
+    "paling lambat tiga",
 )
 _REASON_EVIDENCE_WORDS = (
     "holiday",
@@ -334,6 +353,11 @@ def conversation_has_leave_dates(
         lower = text.casefold()
         if any(word in lower for word in _DATE_EVIDENCE_WORDS):
             return True
+    # Day-of-month correction while leave intake is open (e.g. user replies "28").
+    if re.fullmatch(r"\d{1,2}", (message or "").strip()) and leave_intake_still_open(
+        history or []
+    ):
+        return True
     return False
 
 
@@ -346,6 +370,147 @@ def conversation_has_leave_reason(
         if any(word in lower for word in _REASON_EVIDENCE_WORDS):
             return True
     return False
+
+
+def parse_leave_duration_days(
+    message: str,
+    history: list[dict[str, Any]] | None = None,
+    today: date | None = None,
+) -> int | None:
+    """Parse duration like '4 hari', '4 days', or bare '4' after a start date exists."""
+    stripped = (message or "").strip()
+    match = _DURATION_RE.match(stripped)
+    if match:
+        days = int(match.group(1))
+        return days if days >= 1 else None
+    bare = _BARE_NUMBER_RE.match(stripped)
+    if not bare:
+        return None
+    # Bare "4" = duration only when leave intake already has a start date in history.
+    if today is None or not leave_intake_still_open(history or []):
+        return None
+    prior_start = resolve_leave_start_date_excluding_message(history, today)
+    if prior_start is None:
+        return None
+    days = int(bare.group(1))
+    return days if days >= 1 else None
+
+
+def conversation_has_leave_duration(
+    message: str,
+    history: list[dict[str, Any]] | None = None,
+    today: date | None = None,
+) -> bool:
+    """True when the user stated duration or an explicit start–end range."""
+    if parse_leave_duration_days(message, history, today) is not None:
+        return True
+    for text in _user_message_texts(message, history):
+        if text.strip() == (message or "").strip():
+            continue
+        if _DURATION_RE.match(text.strip()):
+            return True
+        if len(_ISO_DATE_RE.findall(text)) >= 2:
+            return True
+    if len(_ISO_DATE_RE.findall(message or "")) >= 2:
+        return True
+    return False
+
+
+def resolve_day_of_month(day_num: int, today: date) -> date | None:
+    """Map a bare day number to this month or next month on/after today."""
+    if day_num < 1 or day_num > 31:
+        return None
+    for month_offset in (0, 1):
+        year = today.year + ((today.month - 1 + month_offset) // 12)
+        month = (today.month - 1 + month_offset) % 12 + 1
+        try:
+            candidate = date(year, month, day_num)
+        except ValueError:
+            continue
+        if candidate >= today:
+            return candidate
+    return None
+
+
+def resolve_leave_start_date_excluding_message(
+    history: list[dict[str, Any]] | None,
+    today: date,
+) -> date | None:
+    """Start date from earlier user turns only (for bare duration replies like '4')."""
+    return resolve_leave_start_date("", history, today)
+
+
+def resolve_leave_start_date(
+    message: str,
+    history: list[dict[str, Any]] | None,
+    today: date,
+    *,
+    skip_bare_numbers: bool = False,
+) -> date | None:
+    """Newest user date clue wins (ISO, day number, besok/tomorrow, today)."""
+    texts: list[str] = []
+    if (message or "").strip():
+        texts.append(message)
+    for item in reversed(history or []):
+        if item.get("role") == "user":
+            texts.append(str(item.get("content", "")))
+    prior_start = None
+    if (message or "").strip() and history:
+        prior_start = resolve_leave_start_date_excluding_message(history, today)
+    for index, text in enumerate(texts):
+        stripped = text.strip()
+        if not stripped:
+            continue
+        iso_hits = _ISO_DATE_RE.findall(stripped)
+        if iso_hits:
+            return date.fromisoformat(iso_hits[-1])
+        if re.fullmatch(r"\d{1,2}", stripped):
+            # Current bare number after a known start is duration ("4"), not a new day.
+            if index == 0 and prior_start is not None and (message or "").strip():
+                continue
+            if skip_bare_numbers:
+                continue
+            return resolve_day_of_month(int(stripped), today)
+        lower = stripped.casefold()
+        if "besok" in lower or "tomorrow" in lower:
+            return today + timedelta(days=1)
+        if "hari ini" in lower or re.search(r"\btoday\b", lower):
+            return today
+    return None
+
+
+def resolve_leave_type_from_texts(
+    message: str, history: list[dict[str, Any]] | None = None
+) -> str | None:
+    """Infer leave_type from user wording in this turn or earlier turns."""
+    for text in _user_message_texts(message, history):
+        lower = text.casefold()
+        if "tahunan" in lower or "annual" in lower:
+            return "annual"
+        if "sakit" in lower or "sick" in lower:
+            return "sick"
+        if "orang tua" in lower or "parental" in lower:
+            return "parental"
+    return None
+
+
+def claims_annual_notice_failure(answer: str) -> bool:
+    """True when the model claims annual notice failure in free text."""
+    lower = answer.casefold()
+    return any(cue in lower for cue in _NOTICE_FAILURE_CUES)
+
+
+def message_provides_start_clue(message: str) -> bool:
+    """True when this turn itself states a date (not only duration)."""
+    stripped = (message or "").strip()
+    if not stripped:
+        return False
+    if _ISO_DATE_RE.search(stripped) or _LOOSE_DATE_RE.search(stripped):
+        return True
+    if re.fullmatch(r"\d{1,2}", stripped):
+        return True
+    lower = stripped.casefold()
+    return any(word in lower for word in _DATE_EVIDENCE_WORDS)
 
 
 def leave_intake_still_open(history: list[dict[str, Any]]) -> bool:
@@ -499,7 +664,18 @@ class AgentService:
             {"role": str(item["role"]), "content": str(item["content"])} for item in history
         ]
         messages.append({"role": "user", "content": request.message})
-        instruction_parts = [SYSTEM_INSTRUCTIONS, calendar_brief(self.today_factory())]
+        today = self.today_factory()
+        earliest_annual = add_business_days(today, ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS)
+        instruction_parts = [
+            SYSTEM_INSTRUCTIONS,
+            calendar_brief(today),
+            (
+                "Trusted annual-leave notice (Asia/Jakarta): earliest allowed annual "
+                f"leave start_date is {earliest_annual.isoformat()} "
+                f"({earliest_annual.strftime('%A')}). On or after that date, call "
+                "prepare_leave_request — do not refuse notice yourself."
+            ),
+        ]
         if pending_proposal is not None:
             instruction_parts.append(pending_proposal_brief(pending_proposal))
         instructions = "\n\n".join(instruction_parts)
@@ -560,7 +736,7 @@ class AgentService:
                                 if isinstance(call.arguments, dict)
                                 else {}
                             )
-                            # Hard gate: "langsung ajukan" without dates must not invent dates.
+                            # Hard gate: do not invent dates, 1-day length, or reasons.
                             if call.name == "prepare_leave_request":
                                 if not conversation_has_leave_dates(
                                     request.message, history
@@ -569,6 +745,14 @@ class AgentService:
                                         "Tanggal cuti belum disebutkan. Tanya tanggal mulai "
                                         "dan akhir sebelum menyiapkan pengajuan — jangan "
                                         "mengarang tanggal."
+                                    )
+                                if not conversation_has_leave_duration(
+                                    request.message, history, self.today_factory()
+                                ):
+                                    raise DomainError(
+                                        "Lama cuti (hari kerja) belum disebutkan. Tanya berapa "
+                                        "hari kerja sebelum menyiapkan pengajuan — jangan "
+                                        "menganggap 1 hari hanya karena tanggal mulai ada."
                                     )
                                 if arguments.get("reason") and not conversation_has_leave_reason(
                                     request.message, history
@@ -775,6 +959,137 @@ class AgentService:
             outcome = Outcome.abstained
             answer = "I cannot complete that request right now."
             citations = []
+
+        # Leave drip-feed: domain decides notice/range; do not trust model notice math.
+        duration_days = parse_leave_duration_days(request.message, history, today)
+        resolved_start = resolve_leave_start_date(request.message, history, today)
+        # Bare duration ("4") must keep the prior start date, not re-parse "4" as day 4.
+        if duration_days is not None and _BARE_NUMBER_RE.match(request.message.strip()):
+            resolved_start = resolve_leave_start_date_excluding_message(history, today)
+        resolved_type = resolve_leave_type_from_texts(request.message, history)
+        if (
+            error is None
+            and action_proposal is None
+            and confirm_result is None
+            and leave_intake
+            and resolved_type == "annual"
+            and resolved_start is not None
+            and duration_days is None
+            and message_provides_start_clue(request.message)
+            and resolved_start < earliest_annual
+        ):
+            # Prefer immediate refuse on "besok" over asking how many days first.
+            answer = (
+                "Pengajuan cuti tahunan harus paling lambat tiga hari kerja "
+                "sebelum tanggal mulai. "
+                f"Paling awal dari hari ini: {earliest_annual.isoformat()}. "
+                f"Tanggal {resolved_start.isoformat()} terlalu dekat — pilih tanggal "
+                "pada atau setelah itu."
+            )
+            citations = []
+            outcome = Outcome.abstained
+        elif (
+            error is None
+            and action_proposal is None
+            and confirm_result is None
+            and leave_intake
+            and resolved_type is not None
+            and resolved_start is not None
+            and duration_days is None
+            and message_provides_start_clue(request.message)
+            and (
+                resolved_type != "annual" or resolved_start >= earliest_annual
+            )
+        ):
+            # Valid start date given — ask duration before preparing.
+            answer = (
+                f"Cuti dapat dimulai pada {resolved_start.isoformat()}. "
+                "Berapa hari kerja Anda ingin mengambil cuti?"
+            )
+            citations = []
+            outcome = Outcome.answered
+        elif (
+            error is None
+            and action_proposal is None
+            and confirm_result is None
+            and leave_intake
+            and duration_days is not None
+            and resolved_start is not None
+            and resolved_type is not None
+        ):
+            start_date, end_date = first_business_days(resolved_start, duration_days)
+            try:
+                _result, proposal = self.tools.execute(
+                    "prepare_leave_request",
+                    {
+                        "leave_type": resolved_type,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
+                        "reason": None,
+                    },
+                    auth,
+                )
+                if proposal is not None:
+                    action_proposal = proposal
+                    answer = (
+                        f"Leave proposal is ready for {start_date.isoformat()} to "
+                        f"{end_date.isoformat()} ({duration_days} business days). "
+                        "Confirm to create a pending request."
+                    )
+                    citations = []
+                    outcome = Outcome.action_proposed
+                    tool_summaries.append(
+                        ToolCallSummary(
+                            name="prepare_leave_request", status="ok", duration_ms=0
+                        )
+                    )
+                    steps.append(
+                        {
+                            "kind": "tool",
+                            "turn": (steps[-1]["turn"] if steps else 1),
+                            "name": "prepare_leave_request",
+                            "status": "ok",
+                            "duration_ms": 0,
+                            "arguments": {
+                                "source": "drip_feed_prepare",
+                                "start_date": start_date.isoformat(),
+                                "end_date": end_date.isoformat(),
+                                "leave_type": resolved_type,
+                            },
+                        }
+                    )
+            except DomainError as exc:
+                answer = redact(str(exc))
+                citations = []
+                outcome = Outcome.abstained
+                tool_summaries.append(
+                    ToolCallSummary(
+                        name="prepare_leave_request", status="error", duration_ms=0
+                    )
+                )
+        elif (
+            error is None
+            and action_proposal is None
+            and claims_annual_notice_failure(answer)
+            and not any(
+                item.name == "prepare_leave_request" and item.status == "error"
+                for item in tool_summaries
+            )
+            and (
+                resolved_start is None
+                or resolved_type != "annual"
+                or resolved_start >= earliest_annual
+            )
+        ):
+            # Model invented a notice failure for a date domain would allow.
+            answer = (
+                f"Berdasarkan kalender tepercaya, cuti tahunan paling awal boleh mulai "
+                f"{earliest_annual.isoformat()}. Jika tanggal mulai Anda pada atau setelah "
+                "itu, pengajuan dapat disiapkan — sebutkan tanggal mulai dan lama cuti "
+                "(hari kerja)."
+            )
+            citations = []
+            outcome = Outcome.answered
 
         # The balance tool is always the signed-in employee. Do not let the model
         # attach another person's name to those figures.
