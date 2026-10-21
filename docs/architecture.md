@@ -1,5 +1,7 @@
 # Architecture
 
+Problem and core ideas: [background.md](background.md).
+
 ## Product
 
 HR Policy and Leave Assistant is an employee-facing service that:

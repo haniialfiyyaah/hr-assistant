@@ -2,7 +2,7 @@
 
 Learning-oriented overview of **HR Policy and Leave Assistant**: what the product does, how requests move through the system, and which modules own each concern.
 
-Related docs: [architecture](architecture.md) · [risks](risks.md) · [demo script](demo.md) · [demo questions](demo-questions.md)
+Related docs: [background](background.md) · [AI guide](ai-guide.md) · [code guide](code-guide.md) · [architecture](architecture.md) · [risks](risks.md) · [demo script](demo.md) · [demo questions](demo-questions.md)
 
 ---
 
@@ -311,14 +311,17 @@ Reports land in `outputs/` (gitignored).
 
 ## 11. Suggested learning order
 
-1. **Trust** — [architecture.md](architecture.md) trust table + bearer auth in `api.py`
-2. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py` (search explains; domain refuses)
-3. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent.py`
-4. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds)
-5. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency
-6. **Threads + traces** — conversations API + in-chat trace inspector
-7. **Eval** — `evaluation_cases.json` + `run_evaluation.py`
-8. **Delivery** — [demo.md](demo.md) Docker sequence
+Read [background.md](background.md) first for the problem and core ideas. Read [ai-guide.md](ai-guide.md) for the two models and the tool loop. Read [code-guide.md](code-guide.md) while you open the files; it follows one chat turn from the UI through `AgentService.run`.
+
+1. **Problem and ideas** — [background.md](background.md)
+2. **Trust** — [architecture.md](architecture.md) trust table + bearer auth in `api.py`
+3. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py` (search explains; domain refuses)
+4. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent.py`
+5. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds)
+6. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency
+7. **Threads + traces** — conversations API + in-chat trace inspector
+8. **Eval** — `evaluation_cases.json` + `run_evaluation.py`
+9. **Delivery** — [demo.md](demo.md) Docker sequence
 
 ---
 

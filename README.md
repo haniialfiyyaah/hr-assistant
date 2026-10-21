@@ -97,7 +97,10 @@ See [Deploy guide](docs/deploy.md).
 
 ## Docs
 
-- [Project guide — flows and details](docs/project-guide.md) (start here to learn the system)
+- [Background — problem, user, and core ideas](docs/background.md)
+- [Project guide — flows and details](docs/project-guide.md)
+- [AI guide — models, tool loop, and RAG](docs/ai-guide.md)
+- [Code guide — how a request moves through the files](docs/code-guide.md)
 - [Deploy — Neon + Vercel](docs/deploy.md)
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
