@@ -61,6 +61,41 @@ def test_annual_leave_allows_start_on_third_business_day() -> None:
     assert "notice_business_days>=3" in summary
 
 
+def test_sick_leave_up_to_two_business_days_is_allowed() -> None:
+    # Mon–Tue = 2 BD → under docs threshold
+    args = PrepareLeaveArgs(
+        start_date=date(2026, 9, 28),
+        end_date=date(2026, 9, 29),
+        leave_type="sick",
+        reason=None,
+    )
+    days, summary = validate_leave_request(
+        args,
+        [LeaveBalance(leave_type="sick", available_days=10, as_of_date=date(2026, 1, 1))],
+        False,
+        date(2026, 9, 23),
+    )
+    assert days == 2
+    assert "sick_docs_threshold_business_days<=2" in summary
+
+
+def test_sick_leave_over_two_business_days_is_blocked() -> None:
+    # Mon–Wed = 3 BD → docs must go through HR system
+    args = PrepareLeaveArgs(
+        start_date=date(2026, 9, 28),
+        end_date=date(2026, 9, 30),
+        leave_type="sick",
+        reason=None,
+    )
+    with pytest.raises(DomainError, match="dokumen pendukung"):
+        validate_leave_request(
+            args,
+            [LeaveBalance(leave_type="sick", available_days=10, as_of_date=date(2026, 1, 1))],
+            False,
+            date(2026, 9, 23),
+        )
+
+
 def test_insufficient_balance_and_overlap_are_blocked() -> None:
     args = PrepareLeaveArgs(
         start_date=date(2026, 10, 1), end_date=date(2026, 10, 9), leave_type="annual", reason=None

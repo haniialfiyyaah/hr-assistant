@@ -66,6 +66,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "Validate and prepare a leave request proposal. "
             "Search leave submission policy first when possible. "
             "Annual leave requires at least three business days' notice before the start date. "
+            "Sick leave longer than two consecutive business days is blocked; escalate via "
+            "create_hr_ticket with a redacted summary instead — never collect a diagnosis. "
             "Does not create a leave request until the user confirms."
         ),
         properties={

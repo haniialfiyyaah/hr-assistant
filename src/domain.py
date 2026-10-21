@@ -12,6 +12,8 @@ class DomainError(ValueError):
 
 # HR-LEAVE-001: submit at least this many business days before the start date.
 ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS = 3
+# HR-LEAVE-002: consecutive sick leave above this many business days needs docs via HR system.
+SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS = 2
 
 
 def business_days(start: date, end: date) -> int:
@@ -65,6 +67,18 @@ def validate_leave_request(
             )
 
     days = business_days(args.start_date, args.end_date)
+
+    # Sick leave >2 consecutive business days: supporting docs via HR system, not chat.
+    if (
+        args.leave_type == "sick"
+        and days > SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS
+    ):
+        raise DomainError(
+            "Cuti sakit lebih dari dua hari kerja memerlukan dokumen pendukung "
+            "melalui sistem HR, bukan melalui asisten. Ajukan tiket HR tanpa "
+            "menyebut diagnosis."
+        )
+
     available = next(
         (item.available_days for item in balances if item.leave_type == args.leave_type),
         0,
@@ -80,6 +94,10 @@ def validate_leave_request(
     ]
     if args.leave_type == "annual":
         summary.append(f"notice_business_days>={ANNUAL_LEAVE_NOTICE_BUSINESS_DAYS}")
+    if args.leave_type == "sick":
+        summary.append(
+            f"sick_docs_threshold_business_days<={SICK_LEAVE_DOCS_THRESHOLD_BUSINESS_DAYS}"
+        )
     return days, summary
 
 
