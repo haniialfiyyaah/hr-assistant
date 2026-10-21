@@ -79,8 +79,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": ["string", "null"],
                 "maxLength": 300,
                 "description": (
-                    "Short reason from the user when they gave one "
-                    "(for example holiday or family). Null only if they gave none."
+                    "Short reason only if the user stated one (for example holiday or family). "
+                    "Use null when they gave none — never invent a reason."
                 ),
             },
         },

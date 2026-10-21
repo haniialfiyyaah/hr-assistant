@@ -71,8 +71,9 @@ def calendar_brief(today: date) -> str:
             f"Next week Monday-Friday is {next_monday.isoformat()} to {next_friday.isoformat()}.",
             f"Next Friday is {next_friday.isoformat()} ({next_friday.strftime('%A')}).",
             (
-                "The first two business days of next week are "
-                f"{two_start.isoformat()} to {two_end.isoformat()}."
+                "Only if the user asks for two business days next week, that range is "
+                f"{two_start.isoformat()} to {two_end.isoformat()}. "
+                "Do not use it as a default when dates were not given."
             ),
         ]
     )
