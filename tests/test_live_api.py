@@ -14,7 +14,8 @@ def test_live_policy_question() -> None:
     response = httpx.post(
         f"{base_url}/api/v1/chat",
         headers={"Authorization": "Bearer token-alya"},
-        json={"message": "Berapa jatah cuti tahunan saya?"},
+        # Policy Q&A (not "saya"/balance) — must retrieve and cite leave policy.
+        json={"message": "Berapa jatah cuti tahunan?"},
         timeout=60,
     )
     response.raise_for_status()
