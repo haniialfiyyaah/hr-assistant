@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from src.agent import AgentService
 from src.cache import NullCache
 from src.config import Settings
-from src.contracts import AuthContext, ChatRequest, ModelToolCall, ModelTurn
+from src.contracts import (
+    ActionProposal,
+    AuthContext,
+    ChatRequest,
+    ModelToolCall,
+    ModelTurn,
+)
 from src.repository import MemoryRepository
 from src.retrieval import RetrievalService
 from src.setup_lab import ROOT, chunk_policy
@@ -191,6 +197,57 @@ def test_incomplete_leave_request_gets_default_clarify_when_model_invents(
     assert response.outcome == "answered"
     assert "Which type do you need" in response.answer
     assert "approved" not in response.answer.lower()
+
+
+class PendingProposalTalkProvider:
+    def embed(self, texts):
+        return [[0.0] * 8 for _ in texts]
+
+    def respond(self, **kwargs):
+        return ModelTurn(
+            response_id="pending-talk",
+            text=(
+                "I see that there is already a pending proposal for your annual leave "
+                "from October 26 to October 28, 2026. Please confirm if you would like "
+                "me to proceed with it."
+            ),
+        )
+
+
+def test_pending_proposal_reply_is_not_replaced_by_leave_clarify(
+    repository: MemoryRepository,
+) -> None:
+    proposal = ActionProposal(
+        proposal_id="AP-PENDINGTALK",
+        leave_type="annual",
+        start_date=date(2026, 10, 26),
+        end_date=date(2026, 10, 28),
+        business_days=3,
+        reason=None,
+        validation_summary=["ok"],
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+    )
+    repository.save_proposal("EMP-001", proposal)
+    conversation_id = repository.create_conversation("EMP-001")
+    repository.append_message(conversation_id, "user", "I want annual leave")
+    repository.append_message(
+        conversation_id,
+        "assistant",
+        "Proposal ready.",
+        outcome="action_proposed",
+        proposal_id=proposal.proposal_id,
+    )
+
+    response = service(repository, PendingProposalTalkProvider()).run(
+        ChatRequest(
+            message="Saya mau cuti tahunan, tolong langsung ajukan.",
+            conversation_id=conversation_id,
+        ),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert "pending proposal" in response.answer.lower()
+    assert "Which type do you need" not in response.answer
+    assert response.action_proposal is None
 
 
 def test_short_leave_follow_up_keeps_thread_context(

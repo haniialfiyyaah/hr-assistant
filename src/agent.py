@@ -158,6 +158,13 @@ _DEFAULT_LEAVE_CLARIFY = (
     "I can help prepare that leave. Which type do you need "
     "(annual, sick, or parental), and what are the start and end dates?"
 )
+_INVENTED_LEAVE_SUCCESS_CUES = (
+    "approved",
+    "leave approved",
+    "sudah disetujui",
+    "sudah diajukan",
+    "for everyone",
+)
 _MEDICAL_PRIVACY_TERMS = (
     "diagnosis",
     "diagnosa",
@@ -379,6 +386,12 @@ def is_clarifying_question(answer: str) -> bool:
         return True
     lower = text.casefold()
     return any(word in lower for word in _CLARIFY_WORDS)
+
+
+def looks_like_invented_leave_success(answer: str) -> bool:
+    """True when the model invents leave approval/success without tools."""
+    lower = answer.casefold()
+    return any(cue in lower for cue in _INVENTED_LEAVE_SUCCESS_CUES)
 
 
 def tool_argument_summary(arguments: dict[str, Any]) -> dict[str, str]:
@@ -824,12 +837,18 @@ class AgentService:
             error is None
             and action_proposal is None
             and confirm_result is None
+            and pending_proposal is None
             and not tool_summaries
             and leave_intake
             and not requires_medical_privacy_search(request.message)
-            and (outcome == Outcome.abstained or not is_clarifying_question(answer))
+            and not requires_leave_decision_policy_search(request.message)
+            and (
+                not answer.strip()
+                or looks_like_invented_leave_success(answer)
+            )
         ):
-            # Keep leave intakes moving when the model abstains or invents a non-question.
+            # Only force clarify when the model invents success or says nothing.
+            # Do not overwrite pending-proposal talk or other real replies.
             answer = _DEFAULT_LEAVE_CLARIFY
             citations = []
             outcome = Outcome.answered
