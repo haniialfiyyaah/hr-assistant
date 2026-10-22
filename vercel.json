@@ -1,8 +1,57 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "src/main.py": {
-      "maxDuration": 300
+  "services": {
+    "api": {
+      "root": ".",
+      "framework": "fastapi",
+      "entrypoint": "src.main:app",
+      "functions": {
+        "src/main.py": {
+          "maxDuration": 60
+        }
+      }
+    },
+    "web": {
+      "root": "web",
+      "framework": "nextjs"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/v1/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/healthz",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/readyz",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/docs",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/openapi.json",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
 }

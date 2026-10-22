@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 
+// Local yarn/Docker only. On Vercel, vercel.json routes /api/v1 to the api
+// service before this rewrite runs. A service binding is not available here:
+// rewrites are fixed at build time, and bindings are injected into functions.
 const apiUrl = (process.env.API_URL || "http://localhost:8000").replace(
   /\/$/,
   "",
