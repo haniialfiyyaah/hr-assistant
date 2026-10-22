@@ -723,6 +723,13 @@ class AgentService:
                             outcome = Outcome.escalated
                         else:
                             outcome = Outcome.answered
+                    elif action_proposal is not None or ticket_proposal is not None:
+                        # Prepare/ticket after search: proposal wins even without citation markers.
+                        outcome = Outcome.action_proposed
+                        citations = []
+                    elif confirm_ticket_result is not None:
+                        outcome = Outcome.escalated
+                        citations = []
                     else:
                         # Policy path without valid citations must abstain.
                         outcome = Outcome.abstained
