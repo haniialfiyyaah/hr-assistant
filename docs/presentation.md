@@ -153,18 +153,21 @@ If the model is slow, wait. p50 was about 3 seconds. If step 3 fails the notice 
 
 ## 10. Obstacles we hit
 
-**Point.** Kendala yang dihadapi. Honest constraints from building the assistant.
+**Point.** Kendala yang dihadapi — keep the obstacles. Say what failed, what already ships, and what is still open.
 
-**Show.** Three cards.
+**Show.** Three cards. Each has Failed + Ships today (and Not yet where true).
 
 **Understand.**
 
-- Multi-turn leave was hard. Short follow-ups like “2 days” or “annual” often lost the leave thread and the model abstained.
-- The notice rule and the sick-document rule live in the policy markdown and again in `domain.py`. A policy edit does not update the gate by itself.
-- Every model call carries system rules, a calendar block, and chat history. Short questions still cost a lot of tokens.
-- (Optional if asked.) The model can invent dates or name the wrong employee. That is why prepare drips fields, confirm is separate, and balance answers get an attribution rewrite.
+| Obstacle | Failed | Solution |
+| --- | --- | --- |
+| Multi-turn leave | Short replies lost the thread | **Ships today:** leave intake, drip-feed prepare, open-proposal remind. Still imperfect. |
+| Two copies of a rule | Policy text and domain can drift | **Ships today:** search explains; domain still gates. **Not yet:** rules with the policy version. |
+| Model invents | Fake dates, wrong employee name | **Ships today:** citation check, confirm separate, balance rewrite. |
 
-**Say.** “The hardest part was not the happy path. It was keeping leave intake across short replies, keeping code gates aligned with the policy text, and paying for a full prompt on every turn.”
+Heavy prompts (rules + calendar + history every call) stay costly — point to **Slimmer LLM input** on the next slide (not shipped yet).
+
+**Say.** “These broke on the way. Here is what already ships as a fix, and where we are still honest that the better fix is not done.”
 
 ---
 
