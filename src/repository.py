@@ -32,10 +32,15 @@ class Repository(Protocol):
     def vector_search(self, embedding: list[float], limit: int) -> list[PolicyChunk]: ...
     def get_balances(self, employee_id: str) -> list[LeaveBalance]: ...
     def has_overlap(self, employee_id: str, start: date, end: date) -> bool: ...
+    def cancel_overlapping_pending_leave_requests(
+        self, employee_id: str, start: date, end: date
+    ) -> int: ...
     def save_proposal(self, employee_id: str, proposal: ActionProposal) -> None: ...
     def get_proposal(self, proposal_id: str) -> tuple[str, ActionProposal] | None: ...
     def proposal_request_id(self, proposal_id: str) -> str | None: ...
+    def proposal_status(self, proposal_id: str) -> str | None: ...
     def latest_open_proposal(self, employee_id: str) -> ActionProposal | None: ...
+    def supersede_open_proposals(self, employee_id: str) -> int: ...
     def confirm_proposal(self, employee_id: str, proposal_id: str, idempotency_key: str) -> ActionResult: ...
     def list_leave_requests(self, employee_id: str) -> list[LeaveRequestView]: ...
     def save_ticket_proposal(self, employee_id: str, proposal: TicketProposal) -> None: ...
@@ -153,10 +158,26 @@ class MemoryRepository:
                 return True
         return False
 
+    def cancel_overlapping_pending_leave_requests(
+        self, employee_id: str, start: date, end: date
+    ) -> int:
+        """Cancel pending leave_requests that overlap the range. Returns count."""
+        count = 0
+        for row in self._requests:
+            if row["employee_id"] != employee_id:
+                continue
+            if row["status"] != "pending_manager_review":
+                continue
+            if start <= row["end_date"] and end >= row["start_date"]:
+                row["status"] = "cancelled"
+                count += 1
+        return count
+
     def save_proposal(self, employee_id: str, proposal: ActionProposal) -> None:
         self._proposals[proposal.proposal_id] = {
             "employee_id": employee_id,
             "proposal": proposal,
+            "status": "open",
             "idempotency_key": None,
             "request_id": None,
             "audit_reference": None,
@@ -175,11 +196,19 @@ class MemoryRepository:
         request_id = row.get("request_id")
         return str(request_id) if request_id else None
 
+    def proposal_status(self, proposal_id: str) -> str | None:
+        row = self._proposals.get(proposal_id)
+        if row is None:
+            return None
+        return str(row.get("status") or "open")
+
     def latest_open_proposal(self, employee_id: str) -> ActionProposal | None:
         now = datetime.now(timezone.utc)
         open_items: list[ActionProposal] = []
         for row in self._proposals.values():
             if row["employee_id"] != employee_id or row.get("request_id"):
+                continue
+            if (row.get("status") or "open") != "open":
                 continue
             proposal: ActionProposal = row["proposal"]
             expires_at = proposal.expires_at
@@ -192,6 +221,20 @@ class MemoryRepository:
             return None
         open_items.sort(key=lambda item: item.expires_at, reverse=True)
         return open_items[0]
+
+    def supersede_open_proposals(self, employee_id: str) -> int:
+        """Mark all open proposals for the employee as superseded. Returns count."""
+        count = 0
+        for row in self._proposals.values():
+            if row["employee_id"] != employee_id:
+                continue
+            if row.get("request_id"):
+                continue
+            if (row.get("status") or "open") != "open":
+                continue
+            row["status"] = "superseded"
+            count += 1
+        return count
 
     def confirm_proposal(
         self, employee_id: str, proposal_id: str, idempotency_key: str
@@ -218,6 +261,9 @@ class MemoryRepository:
                 )
             raise ConflictError("idempotency key conflict")
 
+        if (row.get("status") or "open") != "open":
+            raise ConflictError("proposal not open")
+
         request_id = f"LR-{uuid.uuid4().hex[:12].upper()}"
         audit_reference = f"AUD-{uuid.uuid4().hex[:10].upper()}"
         created_at = datetime.now(timezone.utc)
@@ -237,6 +283,7 @@ class MemoryRepository:
         row["request_id"] = request_id
         row["idempotency_key"] = idempotency_key
         row["audit_reference"] = audit_reference
+        row["status"] = "confirmed"
         return ActionResult(
             request_id=request_id,
             status="pending_manager_review",
@@ -655,6 +702,24 @@ class PostgresRepository:
                 )
                 return cur.fetchone() is not None
 
+    def cancel_overlapping_pending_leave_requests(
+        self, employee_id: str, start: date, end: date
+    ) -> int:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE leave_requests
+                    SET status = 'cancelled'
+                    WHERE employee_id = %s
+                      AND status = 'pending_manager_review'
+                      AND start_date <= %s
+                      AND end_date >= %s
+                    """,
+                    (employee_id, end, start),
+                )
+                return int(cur.rowcount or 0)
+
     def save_proposal(self, employee_id: str, proposal: ActionProposal) -> None:
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
@@ -662,8 +727,8 @@ class PostgresRepository:
                     """
                     INSERT INTO action_proposals (
                         proposal_id, employee_id, leave_type, start_date, end_date,
-                        business_days, reason, validation_summary, expires_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                        business_days, reason, validation_summary, expires_at, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, 'open')
                     ON CONFLICT (proposal_id) DO UPDATE SET
                         employee_id = EXCLUDED.employee_id,
                         leave_type = EXCLUDED.leave_type,
@@ -673,6 +738,7 @@ class PostgresRepository:
                         reason = EXCLUDED.reason,
                         validation_summary = EXCLUDED.validation_summary,
                         expires_at = EXCLUDED.expires_at,
+                        status = 'open',
                         idempotency_key = NULL,
                         request_id = NULL,
                         audit_reference = NULL
@@ -729,6 +795,18 @@ class PostgresRepository:
             return None
         return str(row[0])
 
+    def proposal_status(self, proposal_id: str) -> str | None:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status FROM action_proposals WHERE proposal_id = %s",
+                    (proposal_id,),
+                )
+                row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row[0] or "open")
+
     def latest_open_proposal(self, employee_id: str) -> ActionProposal | None:
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
@@ -738,6 +816,7 @@ class PostgresRepository:
                            reason, validation_summary, expires_at
                     FROM action_proposals
                     WHERE employee_id = %s
+                      AND status = 'open'
                       AND request_id IS NULL
                       AND expires_at > NOW()
                     ORDER BY created_at DESC
@@ -759,6 +838,21 @@ class PostgresRepository:
             expires_at=row[7],
         )
 
+    def supersede_open_proposals(self, employee_id: str) -> int:
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE action_proposals
+                    SET status = 'superseded'
+                    WHERE employee_id = %s
+                      AND status = 'open'
+                      AND request_id IS NULL
+                    """,
+                    (employee_id,),
+                )
+                return int(cur.rowcount or 0)
+
     def confirm_proposal(
         self, employee_id: str, proposal_id: str, idempotency_key: str
     ) -> ActionResult:
@@ -769,7 +863,8 @@ class PostgresRepository:
                     cur.execute(
                         """
                         SELECT employee_id, leave_type, start_date, end_date, business_days,
-                               reason, expires_at, idempotency_key, request_id, audit_reference
+                               reason, expires_at, idempotency_key, request_id, audit_reference,
+                               COALESCE(status, 'open')
                         FROM action_proposals
                         WHERE proposal_id = %s
                         FOR UPDATE
@@ -798,6 +893,9 @@ class PostgresRepository:
                             )
                         raise ConflictError("idempotency key conflict")
 
+                    if row[10] != "open":
+                        raise ConflictError("proposal not open")
+
                     request_id = f"LR-{uuid.uuid4().hex[:12].upper()}"
                     audit_reference = f"AUD-{uuid.uuid4().hex[:10].upper()}"
                     created_at = datetime.now(timezone.utc)
@@ -824,7 +922,8 @@ class PostgresRepository:
                         UPDATE action_proposals
                         SET idempotency_key = %s,
                             request_id = %s,
-                            audit_reference = %s
+                            audit_reference = %s,
+                            status = 'confirmed'
                         WHERE proposal_id = %s
                         """,
                         (idempotency_key, request_id, audit_reference, proposal_id),

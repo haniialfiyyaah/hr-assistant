@@ -31,6 +31,7 @@ from .contracts import (
     TicketResult,
     TicketView,
 )
+from .domain import DomainError, validate_action_proposal
 from .providers import DeterministicProvider, OpenAIProvider
 from .repository import (
     ConflictError,
@@ -259,8 +260,29 @@ def create_app(
         body: ConfirmActionRequest,
         auth: AuthContext = Depends(require_auth),
     ) -> ActionResult:
+        found = repository.get_proposal(proposal_id)
+        if found is None or found[0] != auth.employee_id:
+            raise HTTPException(status_code=404, detail="Proposal not found.")
+        _, proposal = found
+        # Re-validate before first confirm; idempotent replays skip domain gates.
+        if repository.proposal_request_id(proposal_id) is None:
+            status = repository.proposal_status(proposal_id)
+            if status is not None and status != "open":
+                raise HTTPException(status_code=409, detail="proposal not open")
+            try:
+                balances = repository.get_balances(auth.employee_id)
+                overlaps = repository.has_overlap(
+                    auth.employee_id, proposal.start_date, proposal.end_date
+                )
+                validate_action_proposal(
+                    proposal, balances, overlaps, today_in_jakarta()
+                )
+            except DomainError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         try:
-            return repository.confirm_proposal(auth.employee_id, proposal_id, body.idempotency_key)
+            return repository.confirm_proposal(
+                auth.employee_id, proposal_id, body.idempotency_key
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Proposal not found.") from exc
         except ConflictError as exc:

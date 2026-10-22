@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from .calendar import calendar_brief, first_business_days, today_in_jakarta
@@ -28,11 +28,56 @@ from .domain import (
     DomainError,
     add_business_days,
     estimate_cost,
+    parse_open_proposal_exists_error,
+)
+from .leave_intake import (
+    BARE_NUMBER_RE,
+    claims_annual_notice_failure,
+    conversation_has_leave_dates,
+    conversation_has_leave_duration,
+    conversation_has_leave_reason,
+    is_leave_request_intent,
+    message_provides_start_clue,
+    parse_leave_duration_days,
+    prefers_indonesian,
+    resolve_leave_start_date,
+    resolve_leave_start_date_excluding_message,
+    resolve_leave_type_from_texts,
+)
+from .open_proposal import (
+    is_cancel_open_proposal_intent,
+    is_confirm_intent,
+    is_hard_prepare_domain_error,
+    is_keep_open_proposal_intent,
+    is_replace_open_intent,
+    looks_like_open_proposal_remind,
+    remind_open_proposal_answer,
+    replace_open_authorized,
+    shape_prepare_failure,
 )
 from .providers import ModelProvider
 from .repository import ConflictError, ConversationNotFound, Repository
 from .security import redact, stable_safety_id
 from .tools import TOOL_SCHEMAS, ToolExecutor
+
+# Re-exports for tests that import from src.agent
+__all__ = [
+    "AgentService",
+    "claims_annual_notice_failure",
+    "conversation_has_leave_dates",
+    "conversation_has_leave_duration",
+    "conversation_has_leave_reason",
+    "is_cancel_open_proposal_intent",
+    "is_confirm_intent",
+    "is_keep_open_proposal_intent",
+    "is_leave_request_intent",
+    "is_replace_open_intent",
+    "parse_leave_duration_days",
+    "prefers_indonesian",
+    "requires_leave_decision_policy_search",
+    "requires_medical_privacy_search",
+    "resolve_leave_start_date",
+]
 
 CITATION_RE = re.compile(r"\[([A-Z]+-[A-Z0-9]+-\d+)\]")
 
@@ -53,6 +98,7 @@ Rules:
 - Never say another person's name owns those figures. If the user asks about someone else, say you can only report the signed-in employee.
 - prepare_leave_request only creates a proposal. Never approve leave. Humans approve.
 - Before prepare_leave_request, call search_hr_policy for leave submission rules for that leave type, and follow what the retrieved policy says. If prepare_leave_request fails, explain the domain error and do not invent a different rule. Never tell the user that annual-leave notice is too short unless prepare_leave_request failed with that domain error on this turn — if start/end dates are known, call prepare and trust the tool. For sick leave, never ask for or store a diagnosis. If the prepare result validation_summary includes sick_docs_via_hr=required (sick leave longer than two business days), still keep the leave proposal, tell the user supporting documents must go through the HR system (not chat), and also call create_hr_ticket with a redacted summary only — that ticket still needs user confirmation before it opens.
+- Only one open leave proposal. If one is pending and the user starts another leave request, remind them (keep vs cancel-and-create-new) immediately — do not ask more leave details or prepare yet. Use replace_open=true only after they clearly agree to replace. If they keep the existing one, the UI re-shows Confirm.
 - create_hr_ticket only prepares a ticket proposal. The ticket opens only after confirm_hr_ticket (or the UI confirm button).
 - When the user clearly confirms a pending leave proposal (confirm, yes, setuju, ya, or similar), call confirm_leave_request. Prefer the proposal_id from the trusted pending-proposal block. If only a pending ticket proposal exists, call confirm_hr_ticket instead. Words like disetujui or questions about whether something is already approved are not confirmation — answer from policy or status; do not confirm or prepare.
 - Do not prepare leave for policy questions. If the user proposes WFH or remote work as a substitute for sick leave, search remote-work and sick-leave policy, refuse the substitution when the policy says so, and cite retrieved documents — do not offer to prepare leave unless they clearly ask to take sick leave.
@@ -69,7 +115,7 @@ Rules:
 - If the user gives a duration and a relative week, including across earlier turns, call prepare_leave_request with the first that many Monday-Friday days of that week. Say those ISO dates in the answer.
 - "This Friday" or "Friday" means the This Friday date in the calendar for one business day (start_date and end_date the same).
 - Reuse leave type and reason already stated in this message or earlier turns. Do not ask again for a field the user already gave.
-- If leave type and dates are already known, search leave submission policy then call prepare_leave_request (reason=null when they gave none). Do not ask an extra question first just for a missing reason.
+- If leave type and dates are already known, search leave submission policy then call prepare_leave_request with replace_open=false (reason=null when they gave none). Do not ask an extra question first just for a missing reason.
 - If they say next week without a duration, ask how many days. Do not book the whole week.
 - If the leave type or the dates are still ambiguous, ask one short clarifying question and do not call a tool. Ask only for what is missing.
 - Public holidays are not configured. Count Monday-Friday only.
@@ -77,104 +123,8 @@ Rules:
 
 # Prior turns sent back to the model. The new user message is added on top.
 HISTORY_LIMIT = 12
+
 _BALANCE_WORDS = ("balance", "balances", "saldo")
-_LEAVE_WORDS = (
-    "leave",
-    "cuti",
-    "annual",
-    "sick",
-    "parental",
-    "tahunan",
-    "sakit",
-)
-_LEAVE_REQUEST_CUES = (
-    "want",
-    "take",
-    "prepare",
-    "request",
-    "book",
-    "ajukan",
-    "siapkan",
-    "ambil",
-    "mau",
-)
-_RELATIVE_DATE_WORDS = (
-    "next week",
-    "this week",
-    "minggu depan",
-    "minggu ini",
-    "tomorrow",
-    "besok",
-    "today",
-    "hari ini",
-)
-_DATE_EVIDENCE_WORDS = _RELATIVE_DATE_WORDS + (
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "senin",
-    "selasa",
-    "rabu",
-    "kamis",
-    "jumat",
-    "jum'at",
-    "this friday",
-    "next friday",
-    "jumat ini",
-    "jumat depan",
-)
-_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
-_LOOSE_DATE_RE = re.compile(
-    r"\b\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?\b"
-    r"|\b\d{1,2}\s+"
-    r"(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*\b"
-    r"|\b(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*"
-    r"\s+\d{1,2}\b",
-    re.IGNORECASE,
-)
-# With unit: always duration. Bare digits: duration only after a start date is known.
-_DURATION_RE = re.compile(
-    r"^\s*(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)\s*$",
-    re.IGNORECASE,
-)
-# Embedded: "for 2 days", "selama 2 hari", "... 2 business days ..."
-_DURATION_EMBEDDED_RE = re.compile(
-    r"(?:for|selama)\s+(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)"
-    r"|(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)",
-    re.IGNORECASE,
-)
-# Day-of-month inside a sentence: "tanggal 29", "in 29", "on the 29"
-_DAY_OF_MONTH_RE = re.compile(
-    r"(?:tanggal|tgl\.?)\s+(\d{1,2})\b"
-    r"|\bin\s+(\d{1,2})\b"
-    r"|\bon\s+(?:the\s+)?(\d{1,2})\b",
-    re.IGNORECASE,
-)
-_BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2})\s*$")
-_NOTICE_FAILURE_CUES = (
-    "tiga hari kerja",
-    "three business day",
-    "tidak memenuhi",
-    "does not meet",
-    "paling lambat tiga",
-)
-_REASON_EVIDENCE_WORDS = (
-    "holiday",
-    "liburan",
-    "family",
-    "keluarga",
-    "urusan",
-    "wedding",
-    "pernikahan",
-    "travel",
-    "trip",
-    "alasan",
-    "because",
-    "untuk ",
-    "for ",
-)
 _CLARIFY_WORDS = (
     "how many",
     "which type",
@@ -201,23 +151,6 @@ _SCOPE_REFUSE_ID = (
     "Saya hanya membantu kebijakan HR, pengajuan cuti, dan saldo cuti Anda sendiri. "
     "Saya tidak dapat membantu soal matematika, coding, atau topik di luar itu."
 )
-_ID_LANGUAGE_HINTS = (
-    "berapa",
-    "saya",
-    "anda",
-    "yang",
-    "untuk",
-    "tidak",
-    "boleh",
-    "bagaimana",
-    "apakah",
-    "tolong",
-    "cuti",
-    "saldo",
-    "kirim",
-    "sudah",
-    "bantu",
-)
 # Model already refused off-topic — keep its wording instead of swapping the fixed string.
 _SCOPE_REFUSAL_CUES = (
     "only help with hr",
@@ -233,35 +166,6 @@ _SCOPE_REFUSAL_CUES = (
     "di luar itu",
     "topik di luar",
 )
-
-
-def _day_of_month_from_text(text: str) -> int | None:
-    """Extract a day-of-month clue like 'tanggal 29' or 'in 29'."""
-    match = _DAY_OF_MONTH_RE.search(text or "")
-    if not match:
-        return None
-    for group in match.groups():
-        if group is not None:
-            day = int(group)
-            return day if 1 <= day <= 31 else None
-    return None
-
-
-def _duration_days_from_text(text: str) -> int | None:
-    """Parse a full-message or embedded duration ('4 days', 'for 2 days')."""
-    stripped = (text or "").strip()
-    if not stripped:
-        return None
-    match = _DURATION_RE.match(stripped)
-    if match:
-        days = int(match.group(1))
-        return days if days >= 1 else None
-    embedded = _DURATION_EMBEDDED_RE.search(stripped)
-    if embedded:
-        raw = embedded.group(1) or embedded.group(2)
-        days = int(raw)
-        return days if days >= 1 else None
-    return None
 
 
 _INVENTED_LEAVE_SUCCESS_CUES = (
@@ -364,23 +268,6 @@ def medical_privacy_citations_from_retrieval(
     return citations_from_retrieval(retrieved_by_document, _MEDICAL_PRIVACY_DOC_IDS)
 
 
-def is_confirm_intent(message: str) -> bool:
-    """Clear confirmation phrases. Bare 'yes' is left to the model with the pending block.
-
-    Match whole words only so policy questions like "sudah disetujui?" do not
-    trigger the chat-confirm fallback (substring "setuju" inside "disetujui").
-    """
-    text = message.strip().casefold()
-    if text in {"confirm", "setuju", "ok confirm", "yes confirm", "ya confirm"}:
-        return True
-    if re.search(r"\bconfirm\b", text):
-        return True
-    # Indonesian: "setuju" as its own word, not inside disetujui / menyetujui.
-    if re.search(r"(?<![a-zà-ÿ])setuju(?![a-zà-ÿ])", text):
-        return True
-    return False
-
-
 def mentions_other_employee(message: str, auth: AuthContext, profiles: list[AuthContext]) -> bool:
     """True when the user names an employee other than the signed-in one."""
     haystack = message.casefold()
@@ -409,233 +296,6 @@ def signed_in_balance_answer(display_name: str, balances: list[dict[str, Any]]) 
     return f"I can only show your balance. {display_name} has {detail}."
 
 
-def message_is_leave_request(message: str) -> bool:
-    """True when this single user turn is asking to prepare/book leave."""
-    text = message.casefold()
-    has_leave = any(word in text for word in _LEAVE_WORDS)
-    if not has_leave:
-        return False
-    has_request = any(word in text for word in _LEAVE_REQUEST_CUES)
-    has_relative = any(word in text for word in _RELATIVE_DATE_WORDS)
-    return has_request or has_relative
-
-
-def _user_message_texts(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> list[str]:
-    texts = [message]
-    for item in history or []:
-        if item.get("role") == "user":
-            texts.append(str(item.get("content", "")))
-    return texts
-
-
-def conversation_has_leave_dates(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> bool:
-    """True when the user stated dates or a resolvable relative date phrase."""
-    for text in _user_message_texts(message, history):
-        if _ISO_DATE_RE.search(text) or _LOOSE_DATE_RE.search(text):
-            return True
-        if _day_of_month_from_text(text) is not None:
-            return True
-        lower = text.casefold()
-        if any(word in lower for word in _DATE_EVIDENCE_WORDS):
-            return True
-    # Day-of-month correction while leave intake is open (e.g. user replies "28").
-    if re.fullmatch(r"\d{1,2}", (message or "").strip()) and leave_intake_still_open(
-        history or []
-    ):
-        return True
-    return False
-
-
-def conversation_has_leave_reason(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> bool:
-    """True when the user stated a leave reason (not invented by the model)."""
-    for text in _user_message_texts(message, history):
-        lower = text.casefold()
-        if any(word in lower for word in _REASON_EVIDENCE_WORDS):
-            return True
-    return False
-
-
-def parse_leave_duration_days(
-    message: str,
-    history: list[dict[str, Any]] | None = None,
-    today: date | None = None,
-) -> int | None:
-    """Parse duration like '4 hari', 'for 2 days', or bare '4' after a start date exists."""
-    from_text = _duration_days_from_text(message or "")
-    if from_text is not None:
-        return from_text
-    bare = _BARE_NUMBER_RE.match((message or "").strip())
-    if not bare:
-        return None
-    # Bare "4" = duration only when leave intake already has a start date in history.
-    if today is None or not leave_intake_still_open(history or []):
-        return None
-    prior_start = resolve_leave_start_date_excluding_message(history, today)
-    if prior_start is None:
-        return None
-    days = int(bare.group(1))
-    return days if days >= 1 else None
-
-
-def conversation_has_leave_duration(
-    message: str,
-    history: list[dict[str, Any]] | None = None,
-    today: date | None = None,
-) -> bool:
-    """True when the user stated duration or an explicit start–end range."""
-    if parse_leave_duration_days(message, history, today) is not None:
-        return True
-    for text in _user_message_texts(message, history):
-        if text.strip() == (message or "").strip():
-            continue
-        if _duration_days_from_text(text) is not None:
-            return True
-        if len(_ISO_DATE_RE.findall(text)) >= 2:
-            return True
-    if len(_ISO_DATE_RE.findall(message or "")) >= 2:
-        return True
-    return False
-
-
-def resolve_day_of_month(day_num: int, today: date) -> date | None:
-    """Map a bare day number to this month or next month on/after today."""
-    if day_num < 1 or day_num > 31:
-        return None
-    for month_offset in (0, 1):
-        year = today.year + ((today.month - 1 + month_offset) // 12)
-        month = (today.month - 1 + month_offset) % 12 + 1
-        try:
-            candidate = date(year, month, day_num)
-        except ValueError:
-            continue
-        if candidate >= today:
-            return candidate
-    return None
-
-
-def resolve_leave_start_date_excluding_message(
-    history: list[dict[str, Any]] | None,
-    today: date,
-) -> date | None:
-    """Start date from earlier user turns only (for bare duration replies like '4')."""
-    return resolve_leave_start_date("", history, today)
-
-
-def resolve_leave_start_date(
-    message: str,
-    history: list[dict[str, Any]] | None,
-    today: date,
-    *,
-    skip_bare_numbers: bool = False,
-) -> date | None:
-    """Newest user date clue wins (ISO, day number, besok/tomorrow, today)."""
-    texts: list[str] = []
-    if (message or "").strip():
-        texts.append(message)
-    for item in reversed(history or []):
-        if item.get("role") == "user":
-            texts.append(str(item.get("content", "")))
-    prior_start = None
-    if (message or "").strip() and history:
-        prior_start = resolve_leave_start_date_excluding_message(history, today)
-    for index, text in enumerate(texts):
-        stripped = text.strip()
-        if not stripped:
-            continue
-        iso_hits = _ISO_DATE_RE.findall(stripped)
-        if iso_hits:
-            return date.fromisoformat(iso_hits[-1])
-        day_num = _day_of_month_from_text(stripped)
-        if day_num is not None:
-            resolved = resolve_day_of_month(day_num, today)
-            if resolved is not None:
-                return resolved
-        if re.fullmatch(r"\d{1,2}", stripped):
-            # Current bare number after a known start is duration ("4"), not a new day.
-            if index == 0 and prior_start is not None and (message or "").strip():
-                continue
-            if skip_bare_numbers:
-                continue
-            return resolve_day_of_month(int(stripped), today)
-        lower = stripped.casefold()
-        if "besok" in lower or "tomorrow" in lower:
-            return today + timedelta(days=1)
-        if "hari ini" in lower or re.search(r"\btoday\b", lower):
-            return today
-    return None
-
-
-def resolve_leave_type_from_texts(
-    message: str, history: list[dict[str, Any]] | None = None
-) -> str | None:
-    """Infer leave_type from user wording in this turn or earlier turns."""
-    for text in _user_message_texts(message, history):
-        lower = text.casefold()
-        if "tahunan" in lower or "annual" in lower:
-            return "annual"
-        if "sakit" in lower or "sick" in lower:
-            return "sick"
-        if "orang tua" in lower or "parental" in lower:
-            return "parental"
-    return None
-
-
-def claims_annual_notice_failure(answer: str) -> bool:
-    """True when the model claims annual notice failure in free text."""
-    lower = answer.casefold()
-    return any(cue in lower for cue in _NOTICE_FAILURE_CUES)
-
-
-def message_provides_start_clue(message: str) -> bool:
-    """True when this turn itself states a date (not only duration)."""
-    stripped = (message or "").strip()
-    if not stripped:
-        return False
-    if _ISO_DATE_RE.search(stripped) or _LOOSE_DATE_RE.search(stripped):
-        return True
-    if _day_of_month_from_text(stripped) is not None:
-        return True
-    if re.fullmatch(r"\d{1,2}", stripped):
-        return True
-    lower = stripped.casefold()
-    return any(word in lower for word in _DATE_EVIDENCE_WORDS)
-
-
-def leave_intake_still_open(history: list[dict[str, Any]]) -> bool:
-    """True after a leave request until a leave proposal is saved.
-
-    Users often drip details across turns ("24 Oct" → "maybe 22" → "annual").
-    The assistant may acknowledge without asking a question each time, so we
-    keep intake open until prepare_leave_request produces a proposal_id — not
-    only while the last assistant message ends with "?".
-    """
-    last_leave_at: int | None = None
-    for index, item in enumerate(history):
-        if item.get("role") != "user":
-            continue
-        if message_is_leave_request(str(item.get("content", ""))):
-            last_leave_at = index
-    if last_leave_at is None:
-        return False
-    for item in history[last_leave_at + 1 :]:
-        if item.get("role") == "assistant" and item.get("proposal_id"):
-            return False
-    return True
-
-
-def is_leave_request_intent(message: str, history: list[dict[str, Any]] | None = None) -> bool:
-    """True for a leave request, or while an unfinished leave request is open."""
-    if message_is_leave_request(message):
-        return True
-    return leave_intake_still_open(history or [])
-
-
 def is_clarifying_question(answer: str) -> bool:
     """True when the model is asking for missing leave details."""
     text = answer.strip()
@@ -646,11 +306,6 @@ def is_clarifying_question(answer: str) -> bool:
     lower = text.casefold()
     return any(word in lower for word in _CLARIFY_WORDS)
 
-
-def prefers_indonesian(message: str) -> bool:
-    """Heuristic: Indonesian phrasing in the latest user message."""
-    lower = (message or "").casefold()
-    return any(word in lower for word in _ID_LANGUAGE_HINTS)
 
 
 def scope_refuse_answer(message: str) -> str:
@@ -685,13 +340,14 @@ def pending_proposal_brief(proposal: ActionProposal) -> str:
     """Trusted block so the model can confirm by chat without inventing a proposal id."""
     return "\n".join(
         [
-            "Trusted pending leave proposal:",
+            "Trusted pending leave proposal (status=open):",
             f"proposal_id={proposal.proposal_id}",
             f"leave_type={proposal.leave_type}",
             f"start_date={proposal.start_date.isoformat()}",
             f"end_date={proposal.end_date.isoformat()}",
             f"business_days={proposal.business_days}",
-            "If the user confirms, call confirm_leave_request with this proposal_id.",
+            "Confirm → confirm_leave_request. New dates while open → remind keep vs replace; "
+            "prepare with replace_open=true only after they agree to replace.",
         ]
     )
 
@@ -720,6 +376,8 @@ def resolve_pending_proposal(
         if not proposal_id:
             continue
         if repository.proposal_request_id(str(proposal_id)):
+            continue
+        if repository.proposal_status(str(proposal_id)) != "open":
             continue
         found = repository.get_proposal(str(proposal_id))
         if found is None or found[0] != employee_id:
@@ -797,6 +455,9 @@ class AgentService:
         retrieved_chunks: dict[str, dict[str, Any]] = {}
         tool_summaries: list[ToolCallSummary] = []
         action_proposal: ActionProposal | None = None
+        prepare_error_message: str | None = None
+        # True when prepare hit OPEN_PROPOSAL_EXISTS and we kept a remind (LLM or fallback).
+        kept_open_proposal_remind = False
         ticket_proposal: TicketProposal | None = None
         input_tokens = 0
         output_tokens = 0
@@ -914,6 +575,24 @@ class AgentService:
                                     request.message, history
                                 ):
                                     arguments["reason"] = None
+                                # replace_open after cancel/replace consent (this turn or post-remind).
+                                arguments["replace_open"] = replace_open_authorized(
+                                    request.message, history
+                                )
+                                # When the user gave a duration (this turn or earlier),
+                                # compute end from business days — do not trust model end_date.
+                                duration_days = parse_leave_duration_days(
+                                    request.message, history, self.today_factory()
+                                )
+                                resolved_start = resolve_leave_start_date(
+                                    request.message, history, self.today_factory()
+                                )
+                                if duration_days is not None and resolved_start is not None:
+                                    start_date, end_date = first_business_days(
+                                        resolved_start, duration_days
+                                    )
+                                    arguments["start_date"] = start_date.isoformat()
+                                    arguments["end_date"] = end_date.isoformat()
                             result, side_effect = self.tools.execute(
                                 call.name, arguments, auth
                             )
@@ -952,6 +631,8 @@ class AgentService:
                         except Exception as exc:  # noqa: BLE001 - tool errors become tool status
                             status = "error"
                             result = {"error": redact(str(exc))}
+                            if call.name == "prepare_leave_request":
+                                prepare_error_message = str(exc)
                         duration_ms = int((time.perf_counter() - tool_started) * 1000)
                         tool_summaries.append(
                             ToolCallSummary(
@@ -1001,13 +682,14 @@ class AgentService:
                 )
 
                 if prepare_failed and action_proposal is None:
-                    # Domain rejected the proposal (e.g. past start date); never report success.
-                    outcome = Outcome.abstained
-                    answer = (
-                        answer
-                        or "I cannot prepare that leave request because it failed validation."
+                    answer, outcome, citations, kept_open_proposal_remind = (
+                        shape_prepare_failure(
+                            answer=answer,
+                            prepare_error_message=prepare_error_message,
+                            tool_summaries=tool_summaries,
+                            message=request.message,
+                        )
                     )
-                    citations = []
                 elif needs_medical_privacy_search and not searched and not used_ticket:
                     # Privacy Q&A must be grounded; free-form "don't send diagnosis" is not enough.
                     outcome = Outcome.abstained
@@ -1154,13 +836,46 @@ class AgentService:
             citations = []
 
         # Leave drip-feed: domain decides notice/range; do not trust model notice math.
+        # If an open proposal already exists, remind immediately — do not ask duration.
         duration_days = parse_leave_duration_days(request.message, history, today)
         resolved_start = resolve_leave_start_date(request.message, history, today)
         # Bare duration ("4") must keep the prior start date, not re-parse "4" as day 4.
-        if duration_days is not None and _BARE_NUMBER_RE.match(request.message.strip()):
+        if duration_days is not None and BARE_NUMBER_RE.match(request.message.strip()):
             resolved_start = resolve_leave_start_date_excluding_message(history, today)
         resolved_type = resolve_leave_type_from_texts(request.message, history)
+        existing_open_early = self.repository.latest_open_proposal(auth.employee_id)
+        # Bare "batalkan" after remind: continue intake with replace authorization.
+        # Do not supersede yet — prepare validates first (balance may fail).
+        replace_open = replace_open_authorized(request.message, history)
+        replace_after_cancel = (
+            existing_open_early is not None
+            and is_cancel_open_proposal_intent(request.message, history)
+        )
         if (
+            error is None
+            and action_proposal is None
+            and confirm_result is None
+            and leave_intake
+            and existing_open_early is not None
+            and not replace_open
+            and not is_keep_open_proposal_intent(request.message, history)
+            and not is_confirm_intent(request.message)
+        ):
+            citations = []
+            outcome = Outcome.answered
+            if not looks_like_open_proposal_remind(answer or ""):
+                answer = remind_open_proposal_answer(
+                    request.message, existing_open_early
+                )
+            kept_open_proposal_remind = True
+        prepare_hard_failed = any(
+            item.name == "prepare_leave_request" and item.status == "error"
+            for item in tool_summaries
+        ) and is_hard_prepare_domain_error(prepare_error_message or "")
+        if kept_open_proposal_remind or prepare_hard_failed:
+            # Keep open-proposal remind or balance/notice/past-date domain refusal.
+            pass
+        elif (
             error is None
             and action_proposal is None
             and confirm_result is None
@@ -1168,7 +883,9 @@ class AgentService:
             and resolved_type == "annual"
             and resolved_start is not None
             and duration_days is None
-            and message_provides_start_clue(request.message)
+            and (
+                message_provides_start_clue(request.message) or replace_after_cancel
+            )
             and resolved_start < earliest_annual
         ):
             # Prefer immediate refuse on "besok" over asking how many days first.
@@ -1189,7 +906,9 @@ class AgentService:
             and resolved_type is not None
             and resolved_start is not None
             and duration_days is None
-            and message_provides_start_clue(request.message)
+            and (
+                message_provides_start_clue(request.message) or replace_after_cancel
+            )
             and (
                 resolved_type != "annual" or resolved_start >= earliest_annual
             )
@@ -1219,6 +938,7 @@ class AgentService:
                         "start_date": start_date.isoformat(),
                         "end_date": end_date.isoformat(),
                         "reason": None,
+                        "replace_open": replace_open,
                     },
                     auth,
                 )
@@ -1248,13 +968,21 @@ class AgentService:
                                 "start_date": start_date.isoformat(),
                                 "end_date": end_date.isoformat(),
                                 "leave_type": resolved_type,
+                                "replace_open": replace_open,
                             },
                         }
                     )
             except DomainError as exc:
-                answer = redact(str(exc))
+                blocked = parse_open_proposal_exists_error(str(exc))
+                if blocked is not None:
+                    outcome = Outcome.answered
+                    if not looks_like_open_proposal_remind(answer or ""):
+                        answer = remind_open_proposal_answer(request.message, blocked)
+                    kept_open_proposal_remind = True
+                else:
+                    answer = redact(str(exc))
+                    outcome = Outcome.abstained
                 citations = []
-                outcome = Outcome.abstained
                 tool_summaries.append(
                     ToolCallSummary(
                         name="prepare_leave_request", status="error", duration_ms=0
@@ -1310,19 +1038,46 @@ class AgentService:
             and confirm_result is None
             and confirm_ticket_result is None
             and pending_proposal is not None
-            and is_confirm_intent(request.message)
+            and is_keep_open_proposal_intent(request.message, history)
         ):
-            # Chat confirm even if the model skipped the tool call.
-            try:
-                confirmed = self.repository.confirm_proposal(
-                    auth.employee_id,
-                    pending_proposal.proposal_id,
-                    f"confirm-{auth.employee_id}-{pending_proposal.proposal_id}",
-                )
-                confirm_result = confirmed.model_dump(mode="json")
+            # User declined replace — re-show Confirm card for the existing open proposal.
+            action_proposal = pending_proposal
+            outcome = Outcome.action_proposed
+            citations = []
+            if not (answer or "").strip():
                 answer = (
-                    f"Leave request {confirmed.request_id} was created with status "
+                    "Baik — pengajuan yang sudah ada tetap berlaku. "
+                    "Konfirmasi untuk membuat permintaan pending."
+                    if prefers_indonesian(request.message)
+                    else (
+                        "Okay — keeping your existing leave proposal. "
+                        "Confirm to create a pending request."
+                    )
+                )
+        elif (
+            error is None
+            and action_proposal is None
+            and ticket_proposal is None
+            and confirm_result is None
+            and confirm_ticket_result is None
+            and pending_proposal is not None
+            and is_confirm_intent(request.message)
+            and not is_replace_open_intent(request.message)
+        ):
+            # Chat confirm even if the model skipped the tool call (re-validates domain).
+            try:
+                result, _side = self.tools.execute(
+                    "confirm_leave_request",
+                    {"proposal_id": pending_proposal.proposal_id},
+                    auth,
+                )
+                confirm_result = result if isinstance(result, dict) else {}
+                request_id = str(confirm_result.get("request_id") or "")
+                answer = (
+                    f"Leave request {request_id} was created with status "
                     "pending_manager_review. A manager still needs to approve it."
+                    if request_id
+                    else "The pending leave request was confirmed."
                 )
                 citations = []
                 outcome = Outcome.answered
@@ -1339,10 +1094,15 @@ class AgentService:
                         "arguments": {"source": "chat_confirm_fallback"},
                     }
                 )
-            except (KeyError, ConflictError) as exc:
+            except DomainError as exc:
                 outcome = Outcome.abstained
                 answer = redact(str(exc)) or "I could not confirm that leave proposal."
                 citations = []
+                tool_summaries.append(
+                    ToolCallSummary(
+                        name="confirm_leave_request", status="error", duration_ms=0
+                    )
+                )
         elif (
             error is None
             and action_proposal is None

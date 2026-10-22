@@ -177,6 +177,8 @@ class PrepareLeaveArgs(BaseModel):
     end_date: date
     leave_type: Literal["annual", "sick", "parental"]
     reason: str | None = Field(default=None, max_length=300)
+    # When true and an open proposal exists, supersede it and create a new one.
+    replace_open: bool = False
 
 
 class ConfirmLeaveArgs(BaseModel):

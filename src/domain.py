@@ -3,11 +3,17 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from .contracts import LeaveBalance, PrepareLeaveArgs
+from typing import Literal, cast
+
+from .contracts import ActionProposal, LeaveBalance, PrepareLeaveArgs
 
 
 class DomainError(ValueError):
     pass
+
+
+# Prefix so the agent can detect a blocked prepare and remind without a Confirm card.
+OPEN_PROPOSAL_EXISTS_PREFIX = "OPEN_PROPOSAL_EXISTS|"
 
 
 # HR-LEAVE-001: submit at least this many business days before the start date.
@@ -90,6 +96,61 @@ def validate_leave_request(
         else:
             summary.append("sick_docs_via_hr=not_required")
     return days, summary
+
+
+def open_proposal_exists_error(proposal: ActionProposal) -> DomainError:
+    """Structured domain error when prepare is blocked by an open proposal."""
+    return DomainError(
+        f"{OPEN_PROPOSAL_EXISTS_PREFIX}"
+        f"{proposal.proposal_id}|{proposal.leave_type}|"
+        f"{proposal.start_date.isoformat()}|{proposal.end_date.isoformat()}|"
+        f"{proposal.business_days}"
+    )
+
+
+def parse_open_proposal_exists_error(message: str) -> ActionProposal | None:
+    """Parse OPEN_PROPOSAL_EXISTS payload; returns a minimal proposal or None."""
+    text = (message or "").strip()
+    if not text.startswith(OPEN_PROPOSAL_EXISTS_PREFIX):
+        return None
+    parts = text[len(OPEN_PROPOSAL_EXISTS_PREFIX) :].split("|")
+    if len(parts) != 5:
+        return None
+    proposal_id, leave_type, start_s, end_s, days_s = parts
+    try:
+        from datetime import datetime, timezone
+
+        return ActionProposal(
+            proposal_id=proposal_id,
+            leave_type=leave_type,
+            start_date=date.fromisoformat(start_s),
+            end_date=date.fromisoformat(end_s),
+            business_days=int(days_s),
+            reason=None,
+            validation_summary=["open"],
+            expires_at=datetime.now(timezone.utc),
+        )
+    except ValueError:
+        return None
+
+
+def validate_action_proposal(
+    proposal: ActionProposal,
+    balances: list[LeaveBalance],
+    overlaps: bool,
+    today: date,
+) -> tuple[int, list[str]]:
+    """Re-run leave domain gates for confirm / create."""
+    leave_type = proposal.leave_type
+    if leave_type not in ("annual", "sick", "parental"):
+        raise DomainError("Jenis cuti tidak valid.")
+    args = PrepareLeaveArgs(
+        start_date=proposal.start_date,
+        end_date=proposal.end_date,
+        leave_type=cast(Literal["annual", "sick", "parental"], leave_type),
+        reason=proposal.reason,
+    )
+    return validate_leave_request(args, balances, overlaps, today)
 
 
 def estimate_cost(

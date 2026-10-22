@@ -18,7 +18,12 @@ from .contracts import (
     TicketArgs,
     TicketProposal,
 )
-from .domain import DomainError, validate_leave_request
+from .domain import (
+    DomainError,
+    open_proposal_exists_error,
+    validate_action_proposal,
+    validate_leave_request,
+)
 from .repository import ConflictError, Repository
 from .retrieval import RetrievalService
 
@@ -68,6 +73,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "Validate and prepare a leave request proposal. "
             "Search leave submission policy for that leave type first when possible. "
             "Domain may refuse (for example annual notice period, balance, overlap). "
+            "If an open proposal already exists, this fails with OPEN_PROPOSAL_EXISTS "
+            "unless replace_open=true (user consented to cancel the old one and create new). "
             "Sick leave longer than two business days still prepares; the result includes "
             "sick_docs_via_hr=required — then also call create_hr_ticket with a redacted "
             "summary so documents go via the HR system after the user confirms the ticket, "
@@ -86,8 +93,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "Use null when they gave none — never invent a reason."
                 ),
             },
+            "replace_open": {
+                "type": "boolean",
+                "description": (
+                    "Set true only after the user clearly agrees to cancel their existing "
+                    "open proposal and create a new one. Default false."
+                ),
+            },
         },
-        required=["start_date", "end_date", "leave_type", "reason"],
+        required=["start_date", "end_date", "leave_type", "reason", "replace_open"],
     ),
     _function_schema(
         name="confirm_leave_request",
@@ -184,13 +198,28 @@ class ToolExecutor:
                 args = PrepareLeaveArgs.model_validate(arguments)
             except ValidationError as exc:
                 raise DomainError(str(exc)) from exc
+            existing = self.repository.latest_open_proposal(auth.employee_id)
+            if existing is not None and not args.replace_open:
+                raise open_proposal_exists_error(existing)
             balances = self.repository.get_balances(auth.employee_id)
             overlaps = self.repository.has_overlap(
                 auth.employee_id, args.start_date, args.end_date
             )
+            # Overlap with an active leave_request is a real domain block.
+            # On explicit replace, cancel pending (not approved) overlaps first.
+            if overlaps and args.replace_open:
+                self.repository.cancel_overlapping_pending_leave_requests(
+                    auth.employee_id, args.start_date, args.end_date
+                )
+                overlaps = self.repository.has_overlap(
+                    auth.employee_id, args.start_date, args.end_date
+                )
+            # Validate before superseding so a failed prepare keeps the old open proposal.
             days, summary = validate_leave_request(
                 args, balances, overlaps, self.today_factory()
             )
+            if existing is not None and args.replace_open:
+                self.repository.supersede_open_proposals(auth.employee_id)
             proposal = ActionProposal(
                 proposal_id=f"AP-{uuid.uuid4().hex[:12].upper()}",
                 leave_type=args.leave_type,
@@ -216,6 +245,18 @@ class ToolExecutor:
             found = self.repository.get_proposal(proposal_id)
             if found is None or found[0] != auth.employee_id:
                 raise DomainError("Pending leave proposal not found.")
+            status = self.repository.proposal_status(proposal_id)
+            if status is not None and status != "open":
+                raise DomainError("Proposal is no longer open and cannot be confirmed.")
+            _, proposal = found
+            # Re-validate domain rules at confirm time (balance/overlap/notice may change).
+            balances = self.repository.get_balances(auth.employee_id)
+            overlaps = self.repository.has_overlap(
+                auth.employee_id, proposal.start_date, proposal.end_date
+            )
+            validate_action_proposal(
+                proposal, balances, overlaps, self.today_factory()
+            )
             # Same stable key as the chat UI confirm button for this proposal.
             idempotency_key = f"confirm-{auth.employee_id}-{proposal_id}"
             try:

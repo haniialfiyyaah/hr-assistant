@@ -111,6 +111,8 @@ def _schema_sql(embedding_dimensions: int) -> str:
         reason TEXT,
         validation_summary JSONB NOT NULL,
         expires_at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN ('open', 'superseded', 'confirmed')),
         idempotency_key TEXT,
         request_id TEXT REFERENCES leave_requests(request_id),
         audit_reference TEXT,
@@ -210,6 +212,11 @@ def _migrate_sql() -> str:
         audit_reference TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE action_proposals
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
+    UPDATE action_proposals
+        SET status = 'confirmed'
+        WHERE request_id IS NOT NULL AND status = 'open';
     """
 
 

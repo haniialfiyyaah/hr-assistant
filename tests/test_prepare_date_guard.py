@@ -202,6 +202,25 @@ def test_bare_number_is_duration_after_start_date() -> None:
     assert parse_leave_duration_days("29", history=[], today=date(2026, 10, 21)) is None
 
 
+def test_failed_duration_retry_keeps_tanggal_start() -> None:
+    """After tanggal 29 → '4' (rejected) → '3', start stays Oct 29 — not day 4 → Nov 4."""
+    today = date(2026, 10, 22)
+    history = [
+        {"role": "user", "content": "Saya mau cuti tahunan tanggal 29"},
+        {
+            "role": "assistant",
+            "content": "Cuti dapat dimulai pada 2026-10-29. Berapa hari kerja?",
+        },
+        {"role": "user", "content": "4"},
+        {
+            "role": "assistant",
+            "content": "Saldo cuti tidak cukup untuk rentang tanggal ini.",
+        },
+    ]
+    assert resolve_leave_start_date("3", history, today) == date(2026, 10, 29)
+    assert parse_leave_duration_days("3", history, today) == 3
+
+
 class OneDayAssumeProvider:
     """Treats bare day-of-month as a one-day leave prepare."""
 
