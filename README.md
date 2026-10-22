@@ -110,8 +110,6 @@ See [Deploy guide](docs/deploy.md).
 - [Deploy — Neon + Vercel](docs/deploy.md)
 - [Architecture](docs/architecture.md)
 - [Risks](docs/risks.md)
-- [Demo script](docs/demo.md)
-- [Demo questions cheat sheet](docs/demo-questions.md) (English + Indonesian)
 
 ## Hard gates
 
