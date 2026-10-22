@@ -151,8 +151,27 @@ def test_ungrounded_answer_is_abstained(repository: MemoryRepository) -> None:
         AuthContext(employee_id="EMP-001", display_name="Alya"),
     )
     assert response.outcome == "abstained"
-    # Keep the model text in chat; do not swap in a generic English wall.
-    assert "Mars" in response.answer
+    # Off-topic free-form must not leak the model answer into chat.
+    assert "Mars" not in response.answer
+    assert "kebijakan HR" in response.answer or "HR policy" in response.answer
+    assert response.citations == []
+
+
+def test_offtopic_math_is_refused(repository: MemoryRepository) -> None:
+    class MathProvider:
+        def embed(self, texts):
+            return [[0.0] * 8 for _ in texts]
+
+        def respond(self, **kwargs):
+            return ModelTurn(response_id="math", text="2 + 2 = 4")
+
+    response = service(repository, MathProvider()).run(
+        ChatRequest(message="What is 2 + 2?"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "abstained"
+    assert "2 + 2 = 4" not in response.answer
+    assert "HR policy" in response.answer
     assert response.citations == []
 
 
