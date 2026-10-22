@@ -1,4 +1,5 @@
 """Repository contracts. MemoryRepository for tests; PostgreSQL comes later."""
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,9 @@ class Repository(Protocol):
     def proposal_status(self, proposal_id: str) -> str | None: ...
     def latest_open_proposal(self, employee_id: str) -> ActionProposal | None: ...
     def supersede_open_proposals(self, employee_id: str) -> int: ...
-    def confirm_proposal(self, employee_id: str, proposal_id: str, idempotency_key: str) -> ActionResult: ...
+    def confirm_proposal(
+        self, employee_id: str, proposal_id: str, idempotency_key: str
+    ) -> ActionResult: ...
     def list_leave_requests(self, employee_id: str) -> list[LeaveRequestView]: ...
     def save_ticket_proposal(self, employee_id: str, proposal: TicketProposal) -> None: ...
     def get_ticket_proposal(self, proposal_id: str) -> tuple[str, TicketProposal] | None: ...
@@ -140,10 +143,7 @@ class MemoryRepository:
 
     def vector_search(self, embedding: list[float], limit: int) -> list[PolicyChunk]:
         # Memory tests rely on lexical ranking; return a weak uniform score for fusion.
-        return [
-            chunk.model_copy(update={"score": 0.1})
-            for chunk in self.chunks[:limit]
-        ]
+        return [chunk.model_copy(update={"score": 0.1}) for chunk in self.chunks[:limit]]
 
     def get_balances(self, employee_id: str) -> list[LeaveBalance]:
         return list(self._balances.get(employee_id, []))
@@ -452,11 +452,7 @@ class MemoryRepository:
         return str(row["employee_id"])
 
     def current_conversation_id(self, employee_id: str) -> str | None:
-        owned = [
-            row
-            for row in self._conversations.values()
-            if row["employee_id"] == employee_id
-        ]
+        owned = [row for row in self._conversations.values() if row["employee_id"] == employee_id]
         if not owned:
             return None
         owned.sort(key=lambda row: row["updated_at"], reverse=True)
@@ -465,11 +461,7 @@ class MemoryRepository:
     def list_conversations(self, employee_id: str, limit: int = 30) -> list[dict[str, Any]]:
         """Return recent threads that already have a user message (skip empty drafts)."""
         safe_limit = max(1, min(int(limit), 100))
-        owned = [
-            row
-            for row in self._conversations.values()
-            if row["employee_id"] == employee_id
-        ]
+        owned = [row for row in self._conversations.values() if row["employee_id"] == employee_id]
         owned.sort(key=lambda row: row["updated_at"], reverse=True)
         summaries: list[dict[str, Any]] = []
         for row in owned:
@@ -599,10 +591,7 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute("SELECT employee_id, display_name, role FROM employees")
                 rows = cur.fetchall()
-        return [
-            AuthContext(employee_id=row[0], display_name=row[1], role=row[2])
-            for row in rows
-        ]
+        return [AuthContext(employee_id=row[0], display_name=row[1], role=row[2]) for row in rows]
 
     def lexical_search(self, query: str, limit: int) -> list[PolicyChunk]:
         with self.pool.connection() as conn:
@@ -1194,9 +1183,7 @@ class PostgresRepository:
             with conn.cursor() as cur:
                 cur.execute("SELECT payload FROM traces")
                 payloads = [row[0] for row in cur.fetchall()]
-        traces = [
-            dict(item) if isinstance(item, dict) else json.loads(item) for item in payloads
-        ]
+        traces = [dict(item) if isinstance(item, dict) else json.loads(item) for item in payloads]
         run_count = len(traces)
         error_count = sum(1 for item in traces if item.get("error"))
         latencies = [int(item.get("latency_ms") or 0) for item in traces]
@@ -1381,4 +1368,3 @@ class PostgresRepository:
                     (now, conversation_id),
                 )
         return message_id
-

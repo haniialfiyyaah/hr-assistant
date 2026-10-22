@@ -1,4 +1,5 @@
 """Deterministic leave-domain rules; this module must never call the model."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta

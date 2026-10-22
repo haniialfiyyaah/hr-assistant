@@ -1,4 +1,5 @@
 """Strict tool schemas and identity-bound execution."""
+
 from __future__ import annotations
 
 import uuid
@@ -202,9 +203,7 @@ class ToolExecutor:
             if existing is not None and not args.replace_open:
                 raise open_proposal_exists_error(existing)
             balances = self.repository.get_balances(auth.employee_id)
-            overlaps = self.repository.has_overlap(
-                auth.employee_id, args.start_date, args.end_date
-            )
+            overlaps = self.repository.has_overlap(auth.employee_id, args.start_date, args.end_date)
             # Overlap with an active leave_request is a real domain block.
             # On explicit replace, cancel pending (not approved) overlaps first.
             if overlaps and args.replace_open:
@@ -215,9 +214,7 @@ class ToolExecutor:
                     auth.employee_id, args.start_date, args.end_date
                 )
             # Validate before superseding so a failed prepare keeps the old open proposal.
-            days, summary = validate_leave_request(
-                args, balances, overlaps, self.today_factory()
-            )
+            days, summary = validate_leave_request(args, balances, overlaps, self.today_factory())
             if existing is not None and args.replace_open:
                 self.repository.supersede_open_proposals(auth.employee_id)
             proposal = ActionProposal(
@@ -254,9 +251,7 @@ class ToolExecutor:
             overlaps = self.repository.has_overlap(
                 auth.employee_id, proposal.start_date, proposal.end_date
             )
-            validate_action_proposal(
-                proposal, balances, overlaps, self.today_factory()
-            )
+            validate_action_proposal(proposal, balances, overlaps, self.today_factory())
             # Same stable key as the chat UI confirm button for this proposal.
             idempotency_key = f"confirm-{auth.employee_id}-{proposal_id}"
             try:

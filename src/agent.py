@@ -307,7 +307,6 @@ def is_clarifying_question(answer: str) -> bool:
     return any(word in lower for word in _CLARIFY_WORDS)
 
 
-
 def scope_refuse_answer(message: str) -> str:
     """Refuse off-topic free-form answers in the user's language when clear."""
     return _SCOPE_REFUSE_ID if prefers_indonesian(message) else _SCOPE_REFUSE_EN
@@ -549,15 +548,11 @@ class AgentService:
                         status: str = "ok"
                         try:
                             arguments = (
-                                dict(call.arguments)
-                                if isinstance(call.arguments, dict)
-                                else {}
+                                dict(call.arguments) if isinstance(call.arguments, dict) else {}
                             )
                             # Hard gate: do not invent dates, 1-day length, or reasons.
                             if call.name == "prepare_leave_request":
-                                if not conversation_has_leave_dates(
-                                    request.message, history
-                                ):
+                                if not conversation_has_leave_dates(request.message, history):
                                     raise DomainError(
                                         "Tanggal cuti belum disebutkan. Tanya tanggal mulai "
                                         "dan akhir sebelum menyiapkan pengajuan — jangan "
@@ -593,9 +588,7 @@ class AgentService:
                                     )
                                     arguments["start_date"] = start_date.isoformat()
                                     arguments["end_date"] = end_date.isoformat()
-                            result, side_effect = self.tools.execute(
-                                call.name, arguments, auth
-                            )
+                            result, side_effect = self.tools.execute(call.name, arguments, auth)
                             if isinstance(side_effect, ActionProposal):
                                 action_proposal = side_effect
                             elif isinstance(side_effect, TicketProposal):
@@ -674,21 +667,15 @@ class AgentService:
                     for item in tool_summaries
                 )
 
-                needs_medical_privacy_search = requires_medical_privacy_search(
-                    request.message
-                )
-                needs_leave_decision_search = requires_leave_decision_policy_search(
-                    request.message
-                )
+                needs_medical_privacy_search = requires_medical_privacy_search(request.message)
+                needs_leave_decision_search = requires_leave_decision_policy_search(request.message)
 
                 if prepare_failed and action_proposal is None:
-                    answer, outcome, citations, kept_open_proposal_remind = (
-                        shape_prepare_failure(
-                            answer=answer,
-                            prepare_error_message=prepare_error_message,
-                            tool_summaries=tool_summaries,
-                            message=request.message,
-                        )
+                    answer, outcome, citations, kept_open_proposal_remind = shape_prepare_failure(
+                        answer=answer,
+                        prepare_error_message=prepare_error_message,
+                        tool_summaries=tool_summaries,
+                        message=request.message,
                     )
                 elif needs_medical_privacy_search and not searched and not used_ticket:
                     # Privacy Q&A must be grounded; free-form "don't send diagnosis" is not enough.
@@ -770,10 +757,7 @@ class AgentService:
                     )
                 elif ticket_proposal is not None:
                     outcome = Outcome.action_proposed
-                    answer = (
-                        answer
-                        or "HR ticket proposal is ready. Confirm to open the ticket."
-                    )
+                    answer = answer or "HR ticket proposal is ready. Confirm to open the ticket."
                 elif confirm_ticket_result is not None:
                     outcome = Outcome.escalated
                     ticket_id = str(confirm_ticket_result.get("ticket_id") or "")
@@ -847,9 +831,8 @@ class AgentService:
         # Bare "batalkan" after remind: continue intake with replace authorization.
         # Do not supersede yet — prepare validates first (balance may fail).
         replace_open = replace_open_authorized(request.message, history)
-        replace_after_cancel = (
-            existing_open_early is not None
-            and is_cancel_open_proposal_intent(request.message, history)
+        replace_after_cancel = existing_open_early is not None and is_cancel_open_proposal_intent(
+            request.message, history
         )
         if (
             error is None
@@ -864,9 +847,7 @@ class AgentService:
             citations = []
             outcome = Outcome.answered
             if not looks_like_open_proposal_remind(answer or ""):
-                answer = remind_open_proposal_answer(
-                    request.message, existing_open_early
-                )
+                answer = remind_open_proposal_answer(request.message, existing_open_early)
             kept_open_proposal_remind = True
         prepare_hard_failed = any(
             item.name == "prepare_leave_request" and item.status == "error"
@@ -883,9 +864,7 @@ class AgentService:
             and resolved_type == "annual"
             and resolved_start is not None
             and duration_days is None
-            and (
-                message_provides_start_clue(request.message) or replace_after_cancel
-            )
+            and (message_provides_start_clue(request.message) or replace_after_cancel)
             and resolved_start < earliest_annual
         ):
             # Prefer immediate refuse on "besok" over asking how many days first.
@@ -906,12 +885,8 @@ class AgentService:
             and resolved_type is not None
             and resolved_start is not None
             and duration_days is None
-            and (
-                message_provides_start_clue(request.message) or replace_after_cancel
-            )
-            and (
-                resolved_type != "annual" or resolved_start >= earliest_annual
-            )
+            and (message_provides_start_clue(request.message) or replace_after_cancel)
+            and (resolved_type != "annual" or resolved_start >= earliest_annual)
         ):
             # Valid start date given — ask duration before preparing.
             answer = (
@@ -952,9 +927,7 @@ class AgentService:
                     citations = []
                     outcome = Outcome.action_proposed
                     tool_summaries.append(
-                        ToolCallSummary(
-                            name="prepare_leave_request", status="ok", duration_ms=0
-                        )
+                        ToolCallSummary(name="prepare_leave_request", status="ok", duration_ms=0)
                     )
                     steps.append(
                         {
@@ -984,9 +957,7 @@ class AgentService:
                     outcome = Outcome.abstained
                 citations = []
                 tool_summaries.append(
-                    ToolCallSummary(
-                        name="prepare_leave_request", status="error", duration_ms=0
-                    )
+                    ToolCallSummary(name="prepare_leave_request", status="error", duration_ms=0)
                 )
         elif (
             error is None
@@ -1099,9 +1070,7 @@ class AgentService:
                 answer = redact(str(exc)) or "I could not confirm that leave proposal."
                 citations = []
                 tool_summaries.append(
-                    ToolCallSummary(
-                        name="confirm_leave_request", status="error", duration_ms=0
-                    )
+                    ToolCallSummary(name="confirm_leave_request", status="error", duration_ms=0)
                 )
         elif (
             error is None
@@ -1120,9 +1089,7 @@ class AgentService:
                     f"confirm-{auth.employee_id}-{pending_ticket_proposal.proposal_id}",
                 )
                 confirm_ticket_result = confirmed_ticket.model_dump(mode="json")
-                answer = (
-                    f"HR ticket {confirmed_ticket.ticket_id} was opened for follow-up."
-                )
+                answer = f"HR ticket {confirmed_ticket.ticket_id} was opened for follow-up."
                 citations = []
                 outcome = Outcome.escalated
                 tool_summaries.append(
@@ -1153,10 +1120,7 @@ class AgentService:
             and leave_intake
             and not requires_medical_privacy_search(request.message)
             and not requires_leave_decision_policy_search(request.message)
-            and (
-                not answer.strip()
-                or looks_like_invented_leave_success(answer)
-            )
+            and (not answer.strip() or looks_like_invented_leave_success(answer))
         ):
             # Only force clarify when the model invents success or says nothing.
             # Do not overwrite pending-proposal talk or other real replies.
@@ -1189,9 +1153,7 @@ class AgentService:
             conversation_id=conversation_id,
         )
         proposal_id = action_proposal.proposal_id if action_proposal is not None else None
-        ticket_proposal_id = (
-            ticket_proposal.proposal_id if ticket_proposal is not None else None
-        )
+        ticket_proposal_id = ticket_proposal.proposal_id if ticket_proposal is not None else None
         self.repository.append_message(conversation_id, "user", request.message)
         self.repository.append_message(
             conversation_id,
