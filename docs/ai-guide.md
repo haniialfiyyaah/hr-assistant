@@ -141,18 +141,24 @@ stateDiagram-v2
   Asked --> Refused: domain.py rejects
   Asked --> Proposal: prepare_leave_request succeeds
   Refused --> Asked: user supplies a valid range
+  Proposal --> Remind: second leave while still open
+  Remind --> Proposal: keep existing / confirm
+  Remind --> Asked: cancel or replace authorized
+  Asked --> Proposal: replace_open prepare succeeds
+  Proposal --> Superseded: replaced by a newer open proposal
   Proposal --> Pending: user confirms
   Pending --> Pending: same confirm again
-  note right of Proposal: action_proposals only
+  note right of Proposal: action_proposals status=open
   note right of Pending: pending_manager_review
 ```
 
-The model is expected to call `search_hr_policy` first, then `prepare_leave_request` with `start_date`, `end_date`, `leave_type`, and `reason`. Python does not trust the model’s reading of the policy for the write:
+The model is expected to call `search_hr_policy` first, then `prepare_leave_request` with `start_date`, `end_date`, `leave_type`, `reason`, and `replace_open`. Python does not trust the model’s reading of the policy for the write:
 
 - If the conversation never stated a date or a duration, the tool is rejected before domain validation. The model cannot invent “1 day”.
-- `validate_leave_request` in `src/domain.py` checks past dates, overlap, balance, and the 3-business-day annual notice. A wrong tool call does not insert a proposal.
+- Only one proposal may be `open`. A second leave intake reminds (keep vs cancel-and-create). `replace_open` is forced by Python from cancel/replace consent, not from the model alone. Validate runs before supersede so a balance/overlap failure keeps the old open proposal.
+- `validate_leave_request` in `src/domain.py` checks past dates, overlap with active leave requests, balance, and the 3-business-day annual notice. Overlap with a real pending/approved request is a domain block (not a bug). On explicit replace, pending overlaps may be cancelled first.
 - On success the tool returns a proposal object. The outcome becomes `action_proposed` because that object exists, not because the model used the word “proposed”.
-- No leave row exists yet. The next user message “confirm” (or the Confirm button, which sends that word) is another agent turn. The model should call `confirm_leave_request`. If it forgets, Python still confirms when `is_confirm_intent` matches and a proposal is open.
+- No leave row exists yet. The next user message “confirm” (or the Confirm button, which sends that word) is another agent turn. The model should call `confirm_leave_request`. If it forgets, Python still confirms when `is_confirm_intent` matches and a proposal is open. Confirm re-validates domain before writing the leave row.
 
 Why search still runs before prepare: the reply should explain the rule from the chunk. Why `domain.py` runs anyway: the explanation can be wrong, and the insert must not be.
 

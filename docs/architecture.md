@@ -37,6 +37,7 @@ Next.js UI (port 3000)
 | User text / retrieved policy | Untrusted data, never treated as system instructions |
 | Model output | Citations must match documents retrieved on the same run |
 | Leave mutation | No leave row until confirm; status is always pending_manager_review |
+| Open proposals | At most one `open` proposal per employee; replace requires consent, validates first, then supersedes |
 | Prepare gate | `domain.py` refuses invalid prepares even if the model skips or misreads policy |
 | Redis | Cache only; failure is a miss, not an outage |
 | Telemetry | No raw prompts or chain-of-thought; PII redacted |

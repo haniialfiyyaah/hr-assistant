@@ -214,10 +214,13 @@ Before `prepare_leave_request` is allowed to run, the loop checks the conversati
 - no date words → `DomainError` (do not invent a start date)
 - no duration → `DomainError` (a start date is not “1 day”)
 - a reason the user never typed → the argument is forced to `null`
+- `replace_open` is set only when Python sees clear replace/cancel consent (`replace_open_authorized` in `src/open_proposal.py`), not when the model invents it
 
 Those errors become tool `status: error`. They do not create a proposal.
 
 Why block prepare before domain validation: a start date is not “1 day”, and a reason the user never typed must not be stored.
+
+Date and duration parsing live in `src/leave_intake.py` (not in the agent loop body). Bare digits after a real start (`tanggal 29` → `"4"` → `"3"`) stay durations; an older bare `"4"` must not become day-of-month and steal the start.
 
 ### After the model stops
 
@@ -246,7 +249,9 @@ The same branches as a list. The first match wins:
 
 | Condition | Outcome |
 | --- | --- |
-| Prepare tool failed and there is no proposal | `abstained`, explain the domain error |
+| Prepare failed with `OPEN_PROPOSAL_EXISTS` | `answered` remind (keep vs cancel-and-create). No Confirm card. |
+| Prepare failed on balance/notice/past date | `abstained`. Keep the model’s saldo explanation if `get_my_leave_balance` already ran; otherwise surface the domain string. |
+| Prepare failed for another domain reason (e.g. overlap with an active leave request) | Keep a non-empty model answer when it explains the block; otherwise abstain with the domain error. |
 | Medical or “is this already approved?” question with no policy search | `abstained` |
 | A `[HR-…]` marker is not in this run’s retrieved documents | `abstained`, citations cleared |
 | Valid markers | `answered`, or `action_proposed` if a proposal exists |
@@ -264,27 +269,35 @@ The same branches as a list. The first match wins:
 
 ```mermaid
 flowchart TD
-  done[Gates finished] --> drip{Type, start, and duration already in the thread, and no proposal?}
+  done[Gates finished] --> open{Leave intake and an open proposal already exists?}
+  open -->|yes, no replace/keep/confirm| remind[Remind keep vs cancel-and-create. No Confirm card]
+  open -->|replace authorized or no open| drip{Type, start, and duration known, and no proposal this turn?}
   drip -->|yes| self[prepare_leave_request. source drip_feed_prepare]
   drip -->|no| notice{Model claims notice failed, but domain would allow the date?}
   notice -->|yes| fix[Replace the answer with the earliest legal date]
   notice -->|no| other{Message names another employee?}
   other -->|yes| rewrite[signed_in_balance_answer. Own numbers only]
-  other -->|no| conf{User said confirm, and a proposal is open?}
+  other -->|no| keep{User declined replace?}
+  keep -->|yes| reattach[Re-show Confirm for the existing open proposal]
+  keep -->|no| conf{User said confirm, and a proposal is open?}
   conf -->|yes| fallback[confirm_proposal. source chat_confirm_fallback]
   conf -->|no| redact[redact the answer]
+  remind --> redact
   self --> redact
   fix --> redact
   rewrite --> redact
+  reattach --> redact
   fallback --> redact
   redact --> save[Append messages. save_trace]
 ```
 
 These blocks are why a second message sometimes does not match the model’s last sentence.
 
-- **Drip-feed prepare.** If the conversation already has a leave type, a start date, and a duration (“4”, “2 days”) but the model did not call prepare, `run` calls `prepare_leave_request` itself. Waiting for the model drops the proposal. Trace: `source: drip_feed_prepare`.
+- **One open proposal.** If leave intake continues while an `open` proposal exists, remind immediately (keep vs cancel-and-create). Do not ask duration or prepare until the user keeps, confirms, or authorizes replace. Bare `"batalkan"` after a remind authorizes replace; it does not supersede until prepare succeeds.
+- **Drip-feed prepare.** If the conversation already has a leave type, a start date, and a duration (“4”, “2 days”) but the model did not call prepare, `run` calls `prepare_leave_request` itself (with `replace_open` when authorized). Trace: `source: drip_feed_prepare`. Skipped when a hard prepare failure (balance/notice/past) already shaped the answer.
 - **Notice the model invented.** Domain is the notice rule. The model does not get to fail a date domain would accept.
 - **Other employee’s balance.** The tool never loaded the other row. The prose must not pretend it did.
+- **Keep → Confirm.** Declining replace re-attaches the existing open proposal so the UI shows Confirm again.
 - **Chat confirm fallback.** “confirm”, “yes”, “ya”, “setuju” with an open proposal still confirms if the model skipped the tool. Trace: `chat_confirm_fallback`. A pending ticket uses the same idea when no leave proposal is open.
 - **`redact()`** (`src/security.py`) drops email, phone, `token-…`, and personal medical phrases such as “diabetes” before the answer is stored.
 
@@ -298,8 +311,8 @@ Then both messages are appended, and `save_trace` writes the step list, model na
 | --- | --- | --- |
 | `search_hr_policy(query, top_k)` | Read chunks. May write the Redis cache. | None |
 | `get_my_leave_balance()` | `leave_balances` | `auth.employee_id` only. No id argument exists. Extra arguments are ignored. |
-| `prepare_leave_request` | Inserts `action_proposals` after `validate_leave_request` | `auth.employee_id` |
-| `confirm_leave_request` | Inserts `leave_requests` | Proposal must belong to `auth.employee_id` |
+| `prepare_leave_request` | Validates, then inserts `action_proposals` (`status=open`). If another open proposal exists, fails with `OPEN_PROPOSAL_EXISTS` unless `replace_open=true`. On replace: cancel overlapping **pending** leave rows if needed, validate, then supersede the old open proposal and save the new one. A failed validate keeps the old open proposal. | `auth.employee_id` |
+| `confirm_leave_request` | Re-validates domain, then inserts `leave_requests`; marks the proposal `confirmed` | Proposal must belong to `auth.employee_id` and be `open` |
 | `create_hr_ticket` | Inserts `ticket_proposals`. Summary is redacted. | `auth.employee_id` |
 | `confirm_hr_ticket` | Inserts `hr_tickets` | Same owner check |
 
@@ -447,8 +460,8 @@ erDiagram
 | `employees`, `leave_balances` | Seed |
 | `policy_chunks` | Seed (embeddings) |
 | `conversations`, `conversation_messages` | Each chat turn. Assistant row stores `outcome`, `proposal_id`, `ticket_proposal_id`, `trace_id`. |
-| `action_proposals` | Successful prepare. `request_id` stays null until confirm. |
-| `leave_requests` | Confirm only |
+| `action_proposals` | Successful prepare. `status` is `open`, then `superseded` (replace) or `confirmed` (confirm). `request_id` stays null until confirm. |
+| `leave_requests` | Confirm only (or cancelled when replace_open prepares over a pending overlap) |
 | `ticket_proposals` / `hr_tickets` | Ticket prepare / ticket confirm |
 | `traces` | End of every `run`, redacted JSON |
 
@@ -494,7 +507,11 @@ Overlap (a proposal that hits an existing request) is `tests/test_overlap_regres
 
 | What you saw | Look here |
 | --- | --- |
-| “Not enough policy evidence” on a short reply like “2 days” or “annual” | `is_leave_request_intent` and `leave_intake_still_open` in `agent.py`. Follow-up is a Python check, not a flag the model sets. If it misses, the turn is treated as ungrounded and abstains. |
+| “Not enough policy evidence” on a short reply like “2 days” or “annual” | `is_leave_request_intent` / `leave_intake_still_open` in `src/leave_intake.py`. Follow-up is a Python check, not a flag the model sets. |
+| Remind instead of a new proposal / duration ask | One open proposal. `OPEN_PROPOSAL_EXISTS` / early remind in `src/open_proposal.py` + post-loop in `agent.py`. |
+| `"4"` then `"3"` prepared from the wrong start (e.g. Nov 4) | `resolve_leave_start_date` in `src/leave_intake.py` — older bare numbers stay durations when a real start exists. |
+| `"batalkan"` only re-reminds | Needs cancel-after-remind authorization (`is_cancel_open_proposal_intent` / `replace_open_authorized`). Supersede happens only after a successful prepare. |
+| Overlap after replace | Active `leave_requests` still block. `replace_open` cancels **pending** overlaps only; approved/historical rows are not cancelled. |
 | Answer names the other employee but the numbers are yours | `signed_in_balance_answer` after the loop |
 | Confirm button added a “confirm” bubble | `confirmFromChat` in `chat-thread.tsx`, then `is_confirm_intent` / `confirm_leave_request` |
 | Policy text and the refusal disagree | `domain.py` constants win for writes. Search only explains. |
@@ -502,4 +519,4 @@ Overlap (a proposal that hits an existing request) is `tests/test_overlap_regres
 | Second confirm did not create a second request | `confirm_proposal` replay branch |
 | High input tokens on a short question | `SYSTEM_INSTRUCTIONS` + calendar + up to 12 prior messages, repeated for each model turn in the loop. See [ai-guide.md](ai-guide.md). |
 
-Tests that lock these behaviors live under `hr-assistant/tests/`. `tests/test_api.py` and `tests/test_agent_reliability.py` are the fastest way to see the expected outcome without calling OpenAI (`MODEL_MODE=fake`).
+Tests that lock these behaviors live under `hr-assistant/tests/`. Prefer `tests/test_proposal_status.py` and `tests/test_prepare_date_guard.py` for open-proposal / bare-duration cases. `tests/test_api.py` and `tests/test_agent_reliability.py` are the fastest path without calling OpenAI (`MODEL_MODE=fake`).

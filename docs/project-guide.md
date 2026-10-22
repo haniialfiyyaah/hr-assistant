@@ -81,7 +81,8 @@ flowchart TB
 **Outcome gates (server-side):**
 
 - Citations must match documents retrieved on **this** run → otherwise abstain
-- Failed `prepare_leave_request` (past date, short annual notice, balance, overlap, …) → abstain (explain the domain error)
+- Failed `prepare_leave_request` (past date, short annual notice, balance, overlap, …) → abstain (explain the domain error); if balance was looked up, keep the model’s saldo explanation
+- Open proposal already exists → remind keep vs cancel-and-create (`answered`, no Confirm card) until the user keeps, confirms, or authorizes replace
 - Sick leave >2 business days → prepare still succeeds with `sick_docs_via_hr=required`; agent should also `create_hr_ticket` (redacted) for documents via HR, never collect diagnosis
 - Ungrounded free-form answer (no tools / no citations) → abstain
 - Successful ticket → `escalated`
@@ -89,6 +90,8 @@ flowchart TB
 - Final answers are passed through `redact()`
 
 **Search vs prepare:** Before prepare, the agent should call `search_hr_policy` for that leave type and follow retrieved text for answers. `prepare_leave_request` still runs `domain.py` so a wrong tool call cannot create a proposal. System instructions do **not** restate numeric HR thresholds — those live in policy docs + domain.
+
+**One open proposal:** Only one `action_proposals` row may be `open` per employee. A second leave intake reminds first. `replace_open=true` (after clear cancel/replace consent) validates the new range, may cancel overlapping **pending** leave requests, supersedes the old open proposal, then saves the new one. A failed validate leaves the old proposal open.
 
 ### 4.2 Leave confirm (the only leave mutation)
 
@@ -239,8 +242,8 @@ UI paths are fixed in `ui_contract.API_PATHS`.
 | --- | --- | --- |
 | `search_hr_policy` | Hybrid retrieval over policy chunks | Read-only (cache write OK) |
 | `get_my_leave_balance` | Balances for **authenticated** employee only | Read-only |
-| `prepare_leave_request` | Domain-validates and stores a **proposal** | Proposal only |
-| `confirm_leave_request` | Confirms a pending proposal after clear user agreement | Leave row `pending_manager_review` |
+| `prepare_leave_request` | Domain-validates and stores a **proposal** (`open`). Blocks if another is open unless `replace_open` | Proposal only (may supersede prior open) |
+| `confirm_leave_request` | Re-validates, then confirms an **open** proposal after clear user agreement | Leave row `pending_manager_review` |
 | `create_hr_ticket` | Opens an HR ticket (summary redacted) | Ticket row |
 
 Domain rules in `src/domain.py` (no model calls):
@@ -262,6 +265,8 @@ Domain rules in `src/domain.py` (no model calls):
 | `src/cache.py` | Null / Redis / resilient degrade |
 | `src/retrieval.py` | Hybrid search, RRF, rerank |
 | `src/tools.py` | Strict schemas + identity-bound execution |
+| `src/leave_intake.py` | Leave date/duration parsing and intake intent |
+| `src/open_proposal.py` | Open-proposal remind/replace/keep + prepare-failure shaping |
 | `src/providers.py` | OpenAI live provider + deterministic test fake |
 | `src/agent.py` | Tool loop, citations, abstain/escalate gates |
 | `src/repository.py` | `MemoryRepository` (tests) + `PostgresRepository` |
@@ -317,8 +322,8 @@ Read [background.md](background.md) first for the problem and core ideas. Read [
 2. **Trust** — [architecture.md](architecture.md) trust table + bearer auth in `api.py`
 3. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py` (search explains; domain refuses)
 4. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent.py`
-5. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds)
-6. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency
+5. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds); open-proposal remind/replace in `open_proposal.py`
+6. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency (re-validates; proposal must be `open`)
 7. **Threads + traces** — conversations API + in-chat trace inspector
 8. **Eval** — `evaluation_cases.json` + `run_evaluation.py`
 9. **Delivery** — [demo.md](demo.md) Docker sequence
@@ -331,8 +336,9 @@ Read [background.md](background.md) first for the problem and core ideas. Read [
 2. Alya → leave balance → `get_my_leave_balance` only
 3. Alya → annual leave with ≥3 business days’ notice → Confirm → `pending_manager_review` (flow 4.2)
 4. Confirm again → idempotent replay
-5. Short annual notice → prepare refused; sick leave >2 business days → prepare + ticket for docs (no diagnosis); past leave / unknown policy → abstain; medical phrasing → escalate + redact
-6. Ask for another employee’s balance → still own identity
-7. Monitoring admin → Monitoring tab (not leave balance); People is admin-only
+5. (Optional) Start a second leave while one proposal is still open → remind; say batalkan / replace → new proposal supersedes the old
+6. Short annual notice → prepare refused; sick leave >2 business days → prepare + ticket for docs (no diagnosis); past leave / unknown policy → abstain; medical phrasing → escalate + redact
+7. Ask for another employee’s balance → still own identity
+8. Monitoring admin → Monitoring tab (not leave balance); People is admin-only
 
 Full timing script: [demo.md](demo.md).

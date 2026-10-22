@@ -10,7 +10,7 @@ Demo sign-in: `alya@demo.local` / `demo` (also `bima@demo.local`, `admin@demo.lo
 2. **Architecture and trust boundary** (45s) — Bearer identity on the server; tools cannot take another employee id; Redis may degrade; Postgres holds balances, requests, and policy chunks.
 3. **Policy Q&A with citation** (60s) — Sign in as Alya: “How many annual leave days do permanent employees get?” Expect citation `[HR-LEAVE-001]`; open the in-chat trace inspector.
 4. **Own balance and blocked cross-user** (60s) — “What is my leave balance?” Then ask for another employee’s data; server still scopes to Alya.
-5. **Proposal → confirm → pending → replay** (90s) — Propose annual leave with ≥3 business days’ notice, confirm once (`pending_manager_review`), confirm again (idempotent replay).
+5. **Proposal → confirm → pending → replay** (90s) — Propose annual leave with ≥3 business days’ notice, confirm once (`pending_manager_review`), confirm again (idempotent replay). Optional: start another leave while a proposal is still open → remind; cancel/replace → new open proposal, old one superseded.
 6. **Domain refuse / sick docs / redaction** (60s) — Annual with too little notice → prepare refused. Sick leave longer than two business days → proposal plus redacted HR ticket for documents (no diagnosis in chat). Past-dated leave or unknown policy → abstain. Medical/PII phrasing → escalated ticket with redacted answer/trace.
 7. **Evaluation and risks** (60s) — Show `outputs/evaluation_report.md` release decision and skim `docs/risks.md` (including policy/domain drift).
 

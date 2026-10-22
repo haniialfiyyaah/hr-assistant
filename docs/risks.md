@@ -7,6 +7,7 @@ Product-facing risk notes for the HR Policy and Leave Assistant demo. Owners are
 | Cross-employee data access via prompt | High | Medium | Backend | No employee_id on balance tool; auth from bearer token; API authorization on traces/requests | Offline IDOR tests; live balance smoke as Alya |
 | Model invents policy citations | High | Medium | Agent | Citation gate: cited document ids must be retrieved this run; else abstain | Agent reliability tests; evaluation citation validity |
 | Leave created without confirmation | High | Low | Actions | prepare saves proposal only; confirm endpoint is the only writer of pending requests | Action/idempotency tests |
+| Second prepare silently replaces an open proposal | Medium | Low | Actions | One open proposal; remind until keep/confirm/replace; validate before supersede | `tests/test_proposal_status.py` |
 | System claims leave is approved | High | Low | Actions / agent | No approve tool; confirm status fixed to pending_manager_review; forbidden “approved” in eval case | Contracts + evaluation hard gate |
 | Prompt injection in user text or policy docs | High | Medium | Agent / retrieval | Treat retrieved text as data; strict tools; refuse cross-user token leakage | Security evaluation cases |
 | PII / medical detail in traces | High | Medium | Telemetry | Redact email, phone, token-like values, medical cues before persist | Redaction unit test |
