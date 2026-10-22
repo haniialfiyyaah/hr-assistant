@@ -108,7 +108,7 @@ If they ask “what is a chunk?”: a section of a policy file, not the whole fi
 
 **Show.** Steps 1–4. If you have the architecture diagram open, do not switch to it unless they ask. This slide is enough.
 
-**Understand.** `AgentService.run` in `src/agent.py`. The browser sends text and a bearer token, never an employee id. History is the last 12 sentences, not old tool JSON. Redis is only a retrieval cache.
+**Understand.** `AgentService.run` in `src/agent/service.py`. The browser sends text and a bearer token, never an employee id. History is the last 12 sentences, not old tool JSON. Redis is only a retrieval cache.
 
 **Say.** “One message does four things. The token is hashed and becomes the employee. The model asks for a tool, usually search. Python runs that tool and then checks the answer: citation, balance name, confirm. Postgres stores the two messages and a redacted trace. Redis, if it is up, only caches search.”
 

@@ -31,10 +31,10 @@ A **hard gate** is a rule that **must never fail**. In live evaluation, hard-gat
 | Piece | Role | Default |
 | --- | --- | --- |
 | Next.js (`web/`) | Demo UI; talks to HTTP API via `/api/v1` rewrite | `:3000` |
-| FastAPI (`src/api.py`) | Auth, chat, confirm, monitoring | `:8000` |
-| Agent (`src/agent.py`) | Bounded tool loop + outcome gates | — |
-| Tools (`src/tools.py`) | Five tools (no approve) | — |
-| Retrieval (`src/retrieval.py`) | Hybrid RAG | — |
+| FastAPI (`src/api/`) | Auth, chat, confirm, monitoring | `:8000` |
+| Agent (`src/agent/`) | Tool loop, tools, providers, leave intake | — |
+| Domain (`src/domain/`) | Leave rules, contracts, calendar, security | — |
+| Data (`src/data/`) | Repository, retrieval, cache, lab seed | — |
 | Postgres + pgvector | Employees, balances, requests, policy chunks | Compose `postgres` |
 | Redis | Retrieval cache (degrades on failure) | Compose `redis` |
 | OpenAI | Embeddings + Responses API (`store=False`) | From `.env` |
@@ -246,7 +246,7 @@ UI paths are fixed in `ui_contract.API_PATHS`.
 | `confirm_leave_request` | Re-validates, then confirms an **open** proposal after clear user agreement | Leave row `pending_manager_review` |
 | `create_hr_ticket` | Opens an HR ticket (summary redacted) | Ticket row |
 
-Domain rules in `src/domain.py` (no model calls):
+Domain rules in `src/domain/rules.py` (no model calls):
 
 - Past start date; end before start; zero business days; overlap with active request; insufficient balance
 - **Annual** (`HR-LEAVE-001`): start at least **3** business days after today
@@ -259,20 +259,13 @@ Domain rules in `src/domain.py` (no model calls):
 | Module | Responsibility |
 | --- | --- |
 | `src/config.py` | Settings from `.env` (empty optional strings → `None`) |
-| `src/contracts.py` | Request/response types, outcomes, proposals |
-| `src/domain.py` | Deterministic leave validation |
-| `src/security.py` | Token hash, safety id, PII/token redaction |
-| `src/cache.py` | Null / Redis / resilient degrade |
-| `src/retrieval.py` | Hybrid search, RRF, rerank |
-| `src/tools.py` | Strict schemas + identity-bound execution |
-| `src/leave_intake.py` | Leave date/duration parsing and intake intent |
-| `src/open_proposal.py` | Open-proposal remind/replace/keep + prepare-failure shaping |
-| `src/providers.py` | OpenAI live provider + deterministic test fake |
-| `src/agent.py` | Tool loop, citations, abstain/escalate gates |
-| `src/repository.py` | `MemoryRepository` (tests) + `PostgresRepository` |
-| `src/api.py` | FastAPI app and endpoints |
-| `src/setup_lab.py` | Schema + seed employees/policies/embeddings |
-| `src/run_evaluation.py` | 15-case live evaluation → GO/NO-GO |
+| `src/main.py` | Vercel FastAPI entry (`app = create_app()`) |
+| `src/api/` | FastAPI app and routes (`create_app`) |
+| `src/agent/` | `service.py` loop/gates, `tools.py`, `providers.py`, `leave_intake.py`, `open_proposal.py` |
+| `src/domain/` | `rules.py` leave validation, `contracts.py`, `calendar.py`, `security.py` |
+| `src/data/` | `repository.py`, `retrieval.py`, `cache.py`, `setup_lab.py` |
+| `src/eval/` | Live evaluation runner |
+| `src/setup_lab.py` / `src/run_evaluation.py` | Thin CLI entrypoints for `python -m …` (assessment/Docker) |
 | `web/` | Next.js demo UI |
 | `ui_contract.py` | Demo persona load/switch + API path contract (tests) |
 | `data/policies/` | Synthetic HR policy corpus (mostly Indonesian) |
@@ -321,8 +314,8 @@ Read [background.md](background.md) first for the problem and core ideas. Read [
 1. **Problem and ideas** — [background.md](background.md)
 2. **Trust** — [architecture.md](architecture.md) trust table + bearer auth in `api.py`
 3. **Domain before model** — `domain.py` + `prepare_leave_request` in `tools.py` (search explains; domain refuses)
-4. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent.py`
-5. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent.py` (no duplicated HR thresholds); open-proposal remind/replace in `open_proposal.py`
+4. **RAG** — `setup_lab` seed → `retrieval.py` → citation block in `agent/service.py`
+5. **Agent loop** — process-oriented `SYSTEM_INSTRUCTIONS` + outcome gates in `agent/service.py` (no duplicated HR thresholds); open-proposal remind/replace in `agent/open_proposal.py`
 6. **Confirm** — `confirm_leave_request` / confirm handler in `api.py` + idempotency (re-validates; proposal must be `open`)
 7. **Threads + traces** — conversations API + in-chat trace inspector
 8. **Eval** — `evaluation_cases.json` + `run_evaluation.py`

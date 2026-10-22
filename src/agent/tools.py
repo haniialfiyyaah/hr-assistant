@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from .config import Settings
-from .contracts import (
+from ..config import Settings
+from ..domain.contracts import (
     ActionProposal,
     AuthContext,
     ConfirmLeaveArgs,
@@ -19,14 +19,14 @@ from .contracts import (
     TicketArgs,
     TicketProposal,
 )
-from .domain import (
+from ..domain import (
     DomainError,
     open_proposal_exists_error,
     validate_action_proposal,
     validate_leave_request,
 )
-from .repository import ConflictError, Repository
-from .retrieval import RetrievalService
+from ..data.repository import ConflictError, Repository
+from ..data.retrieval import RetrievalService
 
 
 def _function_schema(
@@ -265,7 +265,7 @@ class ToolExecutor:
             return result.model_dump(mode="json"), None
 
         if name == "create_hr_ticket":
-            from .security import redact
+            from ..domain.security import redact
 
             args = TicketArgs.model_validate(arguments)
             proposal = TicketProposal(

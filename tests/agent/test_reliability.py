@@ -3,19 +3,19 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from src.agent import AgentService
-from src.cache import NullCache
+from src.data.cache import NullCache
 from src.config import Settings
-from src.contracts import (
+from src.domain.contracts import (
     ActionProposal,
     AuthContext,
     ChatRequest,
     ModelToolCall,
     ModelTurn,
 )
-from src.repository import MemoryRepository
-from src.retrieval import RetrievalService
+from src.data.repository import MemoryRepository
+from src.data.retrieval import RetrievalService
 from src.setup_lab import ROOT, chunk_policy
-from src.tools import ToolExecutor
+from src.agent.tools import ToolExecutor
 
 
 class FailingProvider:

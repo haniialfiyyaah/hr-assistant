@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from src.cache import NullCache
-from src.providers import DeterministicProvider
-from src.repository import MemoryRepository
-from src.retrieval import RetrievalService
-from src.security import redact
+from src.data.cache import NullCache
+from src.agent.providers import DeterministicProvider
+from src.data.repository import MemoryRepository
+from src.data.retrieval import RetrievalService
+from src.domain.security import redact
 
 
 def test_hybrid_retrieval_prefers_lexical_match(repository: MemoryRepository) -> None:

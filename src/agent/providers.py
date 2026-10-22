@@ -6,7 +6,7 @@ import os
 import time
 from typing import Any, Protocol
 
-from .contracts import ModelToolCall, ModelTurn
+from ..domain.contracts import ModelToolCall, ModelTurn
 
 logger = logging.getLogger(__name__)
 

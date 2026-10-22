@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from .contracts import (
+from ..domain.contracts import (
     ActionProposal,
     ActionResult,
     AuthContext,
@@ -19,9 +19,9 @@ from .contracts import (
     TicketResult,
     TicketView,
 )
-from .security import token_hash
+from ..domain.security import token_hash
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EMPLOYEES_PATH = ROOT / "data" / "employees.json"
 
 

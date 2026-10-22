@@ -11,11 +11,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from .agent import AgentService
-from .cache import NullCache, ResilientCache
-from .calendar import today_in_jakarta
-from .config import Settings, get_settings
-from .contracts import (
+from ..agent import AgentService
+from ..data.cache import NullCache, ResilientCache
+from ..domain.calendar import today_in_jakarta
+from ..config import Settings, get_settings
+from ..domain.contracts import (
     ActionProposal,
     ActionResult,
     AuthContext,
@@ -31,19 +31,19 @@ from .contracts import (
     TicketResult,
     TicketView,
 )
-from .domain import DomainError, validate_action_proposal
-from .providers import DeterministicProvider, OpenAIProvider
-from .repository import (
+from ..domain import DomainError, validate_action_proposal
+from ..agent.providers import DeterministicProvider, OpenAIProvider
+from ..data.repository import (
     ConflictError,
     ConversationNotFound,
     MemoryRepository,
     PostgresRepository,
     Repository,
 )
-from .retrieval import RetrievalService
-from .tools import ToolExecutor
+from ..data.retrieval import RetrievalService
+from ..agent.tools import ToolExecutor
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 MONITORING_RULES_PATH = ROOT / "data" / "monitoring_rules.json"
 
 

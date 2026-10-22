@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import date
 
 from src.agent import AgentService, requires_medical_privacy_search
-from src.cache import NullCache
+from src.data.cache import NullCache
 from src.config import Settings
-from src.contracts import AuthContext, ChatRequest, ModelToolCall, ModelTurn
-from src.repository import MemoryRepository
-from src.retrieval import RetrievalService
-from src.tools import ToolExecutor
+from src.domain.contracts import AuthContext, ChatRequest, ModelToolCall, ModelTurn
+from src.data.repository import MemoryRepository
+from src.data.retrieval import RetrievalService
+from src.agent.tools import ToolExecutor
 
 
 def test_diagnosis_in_chat_question_requires_search() -> None:

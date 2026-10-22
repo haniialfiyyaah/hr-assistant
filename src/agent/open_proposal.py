@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .contracts import ActionProposal, Citation, Outcome, ToolCallSummary
-from .domain import parse_open_proposal_exists_error
+from ..domain.contracts import ActionProposal, Citation, Outcome, ToolCallSummary
+from ..domain import parse_open_proposal_exists_error
 from .leave_intake import prefers_indonesian
-from .security import redact
+from ..domain.security import redact
 
 _BARE_CANCEL_OPEN = frozenset(
     {

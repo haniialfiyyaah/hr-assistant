@@ -5,9 +5,9 @@ import hashlib
 import re
 
 from .cache import ResilientCache
-from .config import get_settings
-from .contracts import PolicyChunk
-from .providers import ModelProvider
+from ..config import get_settings
+from ..domain.contracts import PolicyChunk
+from ..agent.providers import ModelProvider
 from .repository import Repository
 
 

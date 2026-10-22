@@ -47,7 +47,7 @@ Next.js UI (port 3000)
 | Layer | Source | Job |
 | --- | --- | --- |
 | **RAG** (`search_hr_policy`) | Versioned chunks from `data/policies/` | Explain and cite rules; soft guidance before prepare |
-| **Domain** (`validate_leave_request`) | Deterministic code in `src/domain.py` | Hard refuse bad prepares (notice period, balance, overlap, past dates); flag sick docs-via-HR when needed |
+| **Domain** (`validate_leave_request`) | Deterministic code in `src/domain/rules.py` | Hard refuse bad prepares (notice period, balance, overlap, past dates); flag sick docs-via-HR when needed |
 | **System prompt** | Process instructions only | Search first, follow retrieved policy, explain domain errors, no diagnosis — **not** a second copy of HR thresholds |
 
 Critical prepare checks currently mirrored in domain (keep in sync when policy text changes): annual leave ≥ 3 business days’ notice (`HR-LEAVE-001`); sick leave **more than** 2 consecutive business days still **prepares**, with `sick_docs_via_hr=required` so the agent opens a redacted HR ticket for documents (`HR-LEAVE-002` — docs via HR system, not chat).

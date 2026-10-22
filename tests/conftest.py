@@ -7,13 +7,13 @@ from fastapi.testclient import TestClient
 
 from src.agent import AgentService
 from src.api import create_app
-from src.cache import NullCache
+from src.data.cache import NullCache
 from src.config import Settings
-from src.contracts import PolicyChunk
-from src.providers import DeterministicProvider
-from src.repository import MemoryRepository
-from src.retrieval import RetrievalService
-from src.tools import ToolExecutor
+from src.domain.contracts import PolicyChunk
+from src.agent.providers import DeterministicProvider
+from src.data.repository import MemoryRepository
+from src.data.retrieval import RetrievalService
+from src.agent.tools import ToolExecutor
 
 
 @pytest.fixture

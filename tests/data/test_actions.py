@@ -4,8 +4,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from src.contracts import ActionProposal
-from src.repository import ConflictError, MemoryRepository
+from src.domain.contracts import ActionProposal
+from src.data.repository import ConflictError, MemoryRepository
 
 
 def proposal() -> ActionProposal:

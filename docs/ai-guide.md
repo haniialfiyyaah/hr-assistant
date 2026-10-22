@@ -156,7 +156,7 @@ The model is expected to call `search_hr_policy` first, then `prepare_leave_requ
 
 - If the conversation never stated a date or a duration, the tool is rejected before domain validation. The model cannot invent “1 day”.
 - Only one proposal may be `open`. A second leave intake reminds (keep vs cancel-and-create). `replace_open` is forced by Python from cancel/replace consent, not from the model alone. Validate runs before supersede so a balance/overlap failure keeps the old open proposal.
-- `validate_leave_request` in `src/domain.py` checks past dates, overlap with active leave requests, balance, and the 3-business-day annual notice. Overlap with a real pending/approved request is a domain block (not a bug). On explicit replace, pending overlaps may be cancelled first.
+- `validate_leave_request` in `src/domain/rules.py` checks past dates, overlap with active leave requests, balance, and the 3-business-day annual notice. Overlap with a real pending/approved request is a domain block (not a bug). On explicit replace, pending overlaps may be cancelled first.
 - On success the tool returns a proposal object. The outcome becomes `action_proposed` because that object exists, not because the model used the word “proposed”.
 - No leave row exists yet. The next user message “confirm” (or the Confirm button, which sends that word) is another agent turn. The model should call `confirm_leave_request`. If it forgets, Python still confirms when `is_confirm_intent` matches and a proposal is open. Confirm re-validates domain before writing the leave row.
 

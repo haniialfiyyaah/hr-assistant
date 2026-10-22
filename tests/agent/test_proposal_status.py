@@ -12,9 +12,9 @@ from src.agent import (
     is_replace_open_intent,
     parse_leave_duration_days,
 )
-from src.cache import NullCache
+from src.data.cache import NullCache
 from src.config import Settings
-from src.contracts import (
+from src.domain.contracts import (
     ActionProposal,
     AuthContext,
     ChatRequest,
@@ -23,10 +23,10 @@ from src.contracts import (
     ModelTurn,
 )
 from src.domain import OPEN_PROPOSAL_EXISTS_PREFIX, DomainError
-from src.providers import ModelProvider
-from src.repository import ConflictError, MemoryRepository
-from src.retrieval import RetrievalService
-from src.tools import ToolExecutor
+from src.agent.providers import ModelProvider
+from src.data.repository import ConflictError, MemoryRepository
+from src.data.retrieval import RetrievalService
+from src.agent.tools import ToolExecutor
 
 
 def _proposal(

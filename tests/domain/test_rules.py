@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from src.contracts import LeaveBalance, PrepareLeaveArgs
+from src.domain.contracts import LeaveBalance, PrepareLeaveArgs
 from src.domain import (
     DomainError,
     add_business_days,

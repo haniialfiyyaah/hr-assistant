@@ -78,7 +78,7 @@ flowchart LR
 | Overlap is a unit test | The rule is deterministic and must not spend a model call. | A live case would mix wording into a database rule. |
 | The UI never reads Postgres | Next.js calls HTTP. Auth and confirm stay on the server. | A browser query skips both. |
 
-## 1. Process start — `src/api.py`
+## 1. Process start — `src/api/app.py`
 
 `create_app()` builds the FastAPI app. `build_runtime()` chooses the pieces:
 
@@ -161,7 +161,7 @@ Empty “New Chat” is only local state. A Postgres conversation row appears wh
 
 Why the two buttons differ: leave confirm had to appear as a line in the chat. The ticket button already holds a proposal id, so it does not need the model to choose the tool.
 
-## 4. One turn — `AgentService.run` in `src/agent.py`
+## 4. One turn — `AgentService.run` in `src/agent/service.py`
 
 This function is long because the safety checks sit after the model, not inside the prompt. The model loop itself is drawn in [ai-guide.md](ai-guide.md).
 
@@ -214,13 +214,13 @@ Before `prepare_leave_request` is allowed to run, the loop checks the conversati
 - no date words → `DomainError` (do not invent a start date)
 - no duration → `DomainError` (a start date is not “1 day”)
 - a reason the user never typed → the argument is forced to `null`
-- `replace_open` is set only when Python sees clear replace/cancel consent (`replace_open_authorized` in `src/open_proposal.py`), not when the model invents it
+- `replace_open` is set only when Python sees clear replace/cancel consent (`replace_open_authorized` in `src/agent/open_proposal.py`), not when the model invents it
 
 Those errors become tool `status: error`. They do not create a proposal.
 
 Why block prepare before domain validation: a start date is not “1 day”, and a reason the user never typed must not be stored.
 
-Date and duration parsing live in `src/leave_intake.py` (not in the agent loop body). Bare digits after a real start (`tanggal 29` → `"4"` → `"3"`) stay durations; an older bare `"4"` must not become day-of-month and steal the start.
+Date and duration parsing live in `src/agent/leave_intake.py` (not in the agent loop body). Bare digits after a real start (`tanggal 29` → `"4"` → `"3"`) stay durations; an older bare `"4"` must not become day-of-month and steal the start.
 
 ### After the model stops
 
@@ -263,7 +263,7 @@ The same branches as a list. The first match wins:
 | Leave intake and the model asked a clarifying question | `answered` with no tools |
 | Any other free-form text | `abstained` (the text may still be shown; it is not a grounded policy answer) |
 
-`Outcome` in `src/contracts.py` has exactly four values: `answered`, `action_proposed`, `escalated`, `abstained`. Why a closed set: the badge, the stored `outcome` column, and `_score_case` all compare against it.
+`Outcome` in `src/domain/contracts.py` has exactly four values: `answered`, `action_proposed`, `escalated`, `abstained`. Why a closed set: the badge, the stored `outcome` column, and `_score_case` all compare against it.
 
 ### Fixes that run even when the model “finished”
 
@@ -303,7 +303,7 @@ These blocks are why a second message sometimes does not match the model’s las
 
 Then both messages are appended, and `save_trace` writes the step list, model names, retrieved chunks, citations, token counts, and a redacted error if the provider threw.
 
-## 5. Tools — `src/tools.py`
+## 5. Tools — `src/agent/tools.py`
 
 `TOOL_SCHEMAS` is the only tool list the model sees. `ToolExecutor.execute` is the only implementation. Unknown names raise `DomainError`.
 
@@ -322,7 +322,7 @@ Confirm from the tool uses the idempotency key `confirm-{employee_id}-{proposal_
 
 Why a missing tool is an error instead of a no-op: an unknown name must not be reported as success.
 
-## 6. Domain rules — `src/domain.py`
+## 6. Domain rules — `src/domain/rules.py`
 
 This file must not call the model. `validate_leave_request` is the hard gate for a proposal:
 
@@ -360,7 +360,7 @@ Why the sick case still prepares: the policy asks for documents through HR, not 
 
 ## 7. Retrieval — seed once, search per question
 
-### Seed — `src/setup_lab.py`
+### Seed — `src/data/setup_lab.py` (`python -m src.setup_lab`)
 
 ```mermaid
 flowchart LR
@@ -380,7 +380,7 @@ flowchart LR
 
 Run `python -m src.setup_lab` to create tables and seed. `--reset` drops and recreates. Without `--reset`, existing rows stay. Why the default keeps rows: a second seed during a demo must not delete the leave you just confirmed.
 
-### Search — `src/retrieval.py` `RetrievalService.search`
+### Search — `src/data/retrieval.py` `RetrievalService.search`
 
 ```mermaid
 flowchart TD
@@ -408,7 +408,7 @@ The same search as steps:
 
 ## 8. Confirm in the database — `PostgresRepository.confirm_proposal`
 
-`src/repository.py`. One transaction, `SELECT … FOR UPDATE` on the proposal:
+`src/data/repository.py`. One transaction, `SELECT … FOR UPDATE` on the proposal:
 
 ```mermaid
 flowchart TD
@@ -483,7 +483,7 @@ The model is told to write `[HR-LEAVE-001]` style markers. A marker is kept only
 
 The bubble shows the citation that survived. The inspector list includes chunks the answer did not cite. Several chunks can share one `document_id` (two sections of `HR-LEAVE-001`). Why one row per document for the gate: the marker names a document, not a section. Why the inspector still lists chunks: you need to see which section was actually returned.
 
-## 11. Evaluation — `src/run_evaluation.py`
+## 11. Evaluation — `src/eval/run_evaluation.py` (`python -m src.run_evaluation`)
 
 ```mermaid
 flowchart TD
@@ -501,15 +501,15 @@ flowchart TD
 
 A fast HTTP 200 with a worse recall is not a release. The last local report is `outputs/evaluation_report.md`.
 
-Overlap (a proposal that hits an existing request) is `tests/test_overlap_regression.py`, not one of the 15 live cases. Why: the rule does not need a model, and a live case would make a database check look like a wording check.
+Overlap (a proposal that hits an existing request) is `tests/domain/test_overlap.py`, not one of the 15 live cases. Why: the rule does not need a model, and a live case would make a database check look like a wording check.
 
 ## 12. Where to look when a chat surprises you
 
 | What you saw | Look here |
 | --- | --- |
-| “Not enough policy evidence” on a short reply like “2 days” or “annual” | `is_leave_request_intent` / `leave_intake_still_open` in `src/leave_intake.py`. Follow-up is a Python check, not a flag the model sets. |
-| Remind instead of a new proposal / duration ask | One open proposal. `OPEN_PROPOSAL_EXISTS` / early remind in `src/open_proposal.py` + post-loop in `agent.py`. |
-| `"4"` then `"3"` prepared from the wrong start (e.g. Nov 4) | `resolve_leave_start_date` in `src/leave_intake.py` — older bare numbers stay durations when a real start exists. |
+| “Not enough policy evidence” on a short reply like “2 days” or “annual” | `is_leave_request_intent` / `leave_intake_still_open` in `src/agent/leave_intake.py`. Follow-up is a Python check, not a flag the model sets. |
+| Remind instead of a new proposal / duration ask | One open proposal. `OPEN_PROPOSAL_EXISTS` / early remind in `src/agent/open_proposal.py` + post-loop in `agent/service.py`. |
+| `"4"` then `"3"` prepared from the wrong start (e.g. Nov 4) | `resolve_leave_start_date` in `src/agent/leave_intake.py` — older bare numbers stay durations when a real start exists. |
 | `"batalkan"` only re-reminds | Needs cancel-after-remind authorization (`is_cancel_open_proposal_intent` / `replace_open_authorized`). Supersede happens only after a successful prepare. |
 | Overlap after replace | Active `leave_requests` still block. `replace_open` cancels **pending** overlaps only; approved/historical rows are not cancelled. |
 | Answer names the other employee but the numbers are yours | `signed_in_balance_answer` after the loop |
@@ -519,4 +519,4 @@ Overlap (a proposal that hits an existing request) is `tests/test_overlap_regres
 | Second confirm did not create a second request | `confirm_proposal` replay branch |
 | High input tokens on a short question | `SYSTEM_INSTRUCTIONS` + calendar + up to 12 prior messages, repeated for each model turn in the loop. See [ai-guide.md](ai-guide.md). |
 
-Tests that lock these behaviors live under `hr-assistant/tests/`. Prefer `tests/test_proposal_status.py` and `tests/test_prepare_date_guard.py` for open-proposal / bare-duration cases. `tests/test_api.py` and `tests/test_agent_reliability.py` are the fastest path without calling OpenAI (`MODEL_MODE=fake`).
+Tests mirror `src/` under `tests/agent/`, `tests/api/`, `tests/domain/`, `tests/data/`. Prefer `tests/agent/test_proposal_status.py` and `tests/agent/test_prepare_date_guard.py` for open-proposal / bare-duration cases. `tests/api/test_api.py` and `tests/agent/test_reliability.py` are the fastest path without calling OpenAI (`MODEL_MODE=fake`).
