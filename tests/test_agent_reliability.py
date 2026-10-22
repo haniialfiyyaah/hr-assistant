@@ -175,6 +175,28 @@ def test_offtopic_math_is_refused(repository: MemoryRepository) -> None:
     assert response.citations == []
 
 
+def test_offtopic_keeps_model_refusal_wording(repository: MemoryRepository) -> None:
+    class ModelRefuseProvider:
+        def embed(self, texts):
+            return [[0.0] * 8 for _ in texts]
+
+        def respond(self, **kwargs):
+            return ModelTurn(
+                response_id="refuse",
+                text=(
+                    "I only help with HR topics here — I cannot help with coding questions."
+                ),
+            )
+
+    response = service(repository, ModelRefuseProvider()).run(
+        ChatRequest(message="Write a Python sort function"),
+        AuthContext(employee_id="EMP-001", display_name="Alya"),
+    )
+    assert response.outcome == "abstained"
+    assert "cannot help with coding" in response.answer
+    assert "Python sort" not in response.answer
+
+
 class LeaveClarifyProvider:
     def embed(self, texts):
         return [[0.0] * 8 for _ in texts]

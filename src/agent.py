@@ -139,6 +139,19 @@ _DURATION_RE = re.compile(
     r"^\s*(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)\s*$",
     re.IGNORECASE,
 )
+# Embedded: "for 2 days", "selama 2 hari", "... 2 business days ..."
+_DURATION_EMBEDDED_RE = re.compile(
+    r"(?:for|selama)\s+(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)"
+    r"|(\d{1,2})\s*(?:hari(?:\s+kerja)?|days?(?:\s+business)?|business\s+days?)",
+    re.IGNORECASE,
+)
+# Day-of-month inside a sentence: "tanggal 29", "in 29", "on the 29"
+_DAY_OF_MONTH_RE = re.compile(
+    r"(?:tanggal|tgl\.?)\s+(\d{1,2})\b"
+    r"|\bin\s+(\d{1,2})\b"
+    r"|\bon\s+(?:the\s+)?(\d{1,2})\b",
+    re.IGNORECASE,
+)
 _BARE_NUMBER_RE = re.compile(r"^\s*(\d{1,2})\s*$")
 _NOTICE_FAILURE_CUES = (
     "tiga hari kerja",
@@ -205,6 +218,52 @@ _ID_LANGUAGE_HINTS = (
     "sudah",
     "bantu",
 )
+# Model already refused off-topic — keep its wording instead of swapping the fixed string.
+_SCOPE_REFUSAL_CUES = (
+    "only help with hr",
+    "i only help",
+    "cannot help with",
+    "can't help with",
+    "outside that",
+    "out of scope",
+    "di luar",
+    "hanya membantu",
+    "tidak dapat membantu",
+    "tidak bisa membantu",
+    "di luar itu",
+    "topik di luar",
+)
+
+
+def _day_of_month_from_text(text: str) -> int | None:
+    """Extract a day-of-month clue like 'tanggal 29' or 'in 29'."""
+    match = _DAY_OF_MONTH_RE.search(text or "")
+    if not match:
+        return None
+    for group in match.groups():
+        if group is not None:
+            day = int(group)
+            return day if 1 <= day <= 31 else None
+    return None
+
+
+def _duration_days_from_text(text: str) -> int | None:
+    """Parse a full-message or embedded duration ('4 days', 'for 2 days')."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
+    match = _DURATION_RE.match(stripped)
+    if match:
+        days = int(match.group(1))
+        return days if days >= 1 else None
+    embedded = _DURATION_EMBEDDED_RE.search(stripped)
+    if embedded:
+        raw = embedded.group(1) or embedded.group(2)
+        days = int(raw)
+        return days if days >= 1 else None
+    return None
+
+
 _INVENTED_LEAVE_SUCCESS_CUES = (
     "approved",
     "leave approved",
@@ -378,6 +437,8 @@ def conversation_has_leave_dates(
     for text in _user_message_texts(message, history):
         if _ISO_DATE_RE.search(text) or _LOOSE_DATE_RE.search(text):
             return True
+        if _day_of_month_from_text(text) is not None:
+            return True
         lower = text.casefold()
         if any(word in lower for word in _DATE_EVIDENCE_WORDS):
             return True
@@ -405,13 +466,11 @@ def parse_leave_duration_days(
     history: list[dict[str, Any]] | None = None,
     today: date | None = None,
 ) -> int | None:
-    """Parse duration like '4 hari', '4 days', or bare '4' after a start date exists."""
-    stripped = (message or "").strip()
-    match = _DURATION_RE.match(stripped)
-    if match:
-        days = int(match.group(1))
-        return days if days >= 1 else None
-    bare = _BARE_NUMBER_RE.match(stripped)
+    """Parse duration like '4 hari', 'for 2 days', or bare '4' after a start date exists."""
+    from_text = _duration_days_from_text(message or "")
+    if from_text is not None:
+        return from_text
+    bare = _BARE_NUMBER_RE.match((message or "").strip())
     if not bare:
         return None
     # Bare "4" = duration only when leave intake already has a start date in history.
@@ -435,7 +494,7 @@ def conversation_has_leave_duration(
     for text in _user_message_texts(message, history):
         if text.strip() == (message or "").strip():
             continue
-        if _DURATION_RE.match(text.strip()):
+        if _duration_days_from_text(text) is not None:
             return True
         if len(_ISO_DATE_RE.findall(text)) >= 2:
             return True
@@ -492,6 +551,11 @@ def resolve_leave_start_date(
         iso_hits = _ISO_DATE_RE.findall(stripped)
         if iso_hits:
             return date.fromisoformat(iso_hits[-1])
+        day_num = _day_of_month_from_text(stripped)
+        if day_num is not None:
+            resolved = resolve_day_of_month(day_num, today)
+            if resolved is not None:
+                return resolved
         if re.fullmatch(r"\d{1,2}", stripped):
             # Current bare number after a known start is duration ("4"), not a new day.
             if index == 0 and prior_start is not None and (message or "").strip():
@@ -534,6 +598,8 @@ def message_provides_start_clue(message: str) -> bool:
     if not stripped:
         return False
     if _ISO_DATE_RE.search(stripped) or _LOOSE_DATE_RE.search(stripped):
+        return True
+    if _day_of_month_from_text(stripped) is not None:
         return True
     if re.fullmatch(r"\d{1,2}", stripped):
         return True
@@ -590,6 +656,12 @@ def prefers_indonesian(message: str) -> bool:
 def scope_refuse_answer(message: str) -> str:
     """Refuse off-topic free-form answers in the user's language when clear."""
     return _SCOPE_REFUSE_ID if prefers_indonesian(message) else _SCOPE_REFUSE_EN
+
+
+def looks_like_scope_refusal(answer: str) -> bool:
+    """True when the model already refused as out of HR product scope."""
+    lower = (answer or "").casefold()
+    return any(cue in lower for cue in _SCOPE_REFUSAL_CUES)
 
 
 def looks_like_invented_leave_success(answer: str) -> bool:
@@ -1046,6 +1118,10 @@ class AgentService:
                     citations = []
                 elif answer and leave_intake:
                     # Keep text for post-loop invent/clarify gates; do not scope-refuse yet.
+                    outcome = Outcome.abstained
+                    citations = []
+                elif answer and looks_like_scope_refusal(answer):
+                    # Model already refused off-topic — keep its wording (nicer UX).
                     outcome = Outcome.abstained
                     citations = []
                 elif answer:

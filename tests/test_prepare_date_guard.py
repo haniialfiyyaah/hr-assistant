@@ -7,6 +7,7 @@ from src.agent import (
     conversation_has_leave_dates,
     conversation_has_leave_reason,
     parse_leave_duration_days,
+    resolve_leave_start_date,
 )
 from src.cache import NullCache
 from src.config import Settings
@@ -171,6 +172,21 @@ def test_bare_day_number_is_not_a_duration_without_prior_start() -> None:
     assert parse_leave_duration_days("28") is None
     assert parse_leave_duration_days("4 hari") == 4
     assert parse_leave_duration_days("4 days") == 4
+    assert parse_leave_duration_days("for 2 days") == 2
+    assert parse_leave_duration_days("selama 2 hari") == 2
+    assert (
+        parse_leave_duration_days("I want to take annual leave in 29 for 2 days") == 2
+    )
+
+
+def test_embedded_day_of_month_resolves_start() -> None:
+    today = date(2026, 10, 22)
+    assert resolve_leave_start_date("in 29 for 2 days", [], today) == date(2026, 10, 29)
+    assert resolve_leave_start_date(
+        "cuti tanggal 29 selama 2 hari", [], today
+    ) == date(2026, 10, 29)
+    assert conversation_has_leave_dates("I want annual leave in 29 for 2 days")
+    assert conversation_has_leave_dates("mau cuti tanggal 29 selama 2 hari")
 
 
 def test_bare_number_is_duration_after_start_date() -> None:
