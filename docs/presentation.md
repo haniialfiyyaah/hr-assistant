@@ -1,10 +1,8 @@
 # Presentation script
 
-English deck for the live class slot: **10–15 minutes, including questions**. Talk for about 9–10 minutes (including a short RAG explanation), demo inside that, then leave the rest for questions.
+Talk track for the live class slot: **10–15 minutes, including questions**. Talk for about 9–10 minutes (including a short RAG explanation), demo inside that, then leave the rest for questions.
 
-Slides: [HR Policy and Leave Assistant](https://docs.google.com/presentation/d/1UHfhCbEBuUKPVSETNiPZQqn2IGAdqrWrk-RW8NSDV6c/edit)
-
-Open presenter view. Each slide’s speaker notes match the blocks below. Sign in as Alya before you start (`alya@demo.local` / `demo`). Keep a second tab on `outputs/evaluation_report.md` only if someone asks about evaluation.
+Sign in as Alya before you start (`alya@demo.local` / `demo`). Keep a second tab on `outputs/evaluation_report.md` only if someone asks about evaluation.
 
 Do not improvise dates. Do not type a diagnosis. Do not use “next week”.
 

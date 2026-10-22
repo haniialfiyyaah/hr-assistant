@@ -89,9 +89,15 @@ Build does not require an API key. Runtime reads credentials from `.env`. The AP
 
 Signing out and signing in as another demo user loads that employee’s own threads. Identity is enforced on the server.
 
+## Live demo and slides
+
+- **App:** [hr-assistant-self.vercel.app](https://hr-assistant-self.vercel.app/)
+- **Class slides:** [HR Policy and Leave Assistant (Gamma)](https://gamma.app/docs/HR-Policy-and-Leave-Assistant-t0qdea0pkkd2lj6)
+- Demo sign-in: `alya@demo.local` / `demo` (also `bima@demo.local`, `admin@demo.local`)
+
 ## Deploy (Neon + Vercel)
 
-Production: **Neon** (Postgres/pgvector) + **two Vercel projects** from this repo — FastAPI at repo root (`src/main.py`) and Next.js UI under `web/`. Set the UI project’s `API_URL` to the API project URL. Redis is optional and skipped for v1.
+Production: **Neon** (Postgres/pgvector) + Vercel from this repo. Redis is optional and skipped for v1.
 
 See [Deploy guide](docs/deploy.md).
 
