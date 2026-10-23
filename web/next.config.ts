@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
   output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
+  // Keep demo corpus inside the standalone/Vercel web bundle (policies + directory).
+  outputFileTracingIncludes: {
+    "/*": ["./data/**/*"],
+  },
   turbopack: {
     root: __dirname,
     rules: {

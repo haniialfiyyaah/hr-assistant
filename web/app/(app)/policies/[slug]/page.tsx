@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PageFrame, SurfaceCard } from "@/components/page-frame";
+import { PolicyMarkdown } from "@/components/policy-markdown";
 import { buttonVariants } from "@/components/ui/button";
 import { listPolicies, readPolicy } from "@/lib/data";
 import { cn } from "@/lib/utils";
@@ -22,11 +23,17 @@ export default async function PolicyDetailPage({
     notFound();
   }
 
+  const metaBits = [
+    policy.documentId,
+    policy.version ? `v${policy.version}` : null,
+    policy.effectiveDate ? `effective ${policy.effectiveDate}` : null,
+  ].filter(Boolean);
+
   return (
     <PageFrame
       eyebrow="Policy"
       title={policy.title}
-      description="View only"
+      description={metaBits.length > 0 ? metaBits.join(" · ") : "View only"}
       className="max-w-3xl"
       actions={
         <Link
@@ -40,10 +47,8 @@ export default async function PolicyDetailPage({
         </Link>
       }
     >
-      <SurfaceCard className="overflow-hidden">
-        <pre className="overflow-auto p-5 text-sm leading-relaxed whitespace-pre-wrap text-stone-700">
-          {policy.content}
-        </pre>
+      <SurfaceCard className="overflow-hidden p-5 sm:p-6">
+        <PolicyMarkdown content={policy.body} />
       </SurfaceCard>
     </PageFrame>
   );

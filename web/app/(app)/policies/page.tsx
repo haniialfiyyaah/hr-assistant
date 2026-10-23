@@ -11,7 +11,7 @@ export default async function PoliciesPage() {
     <PageFrame
       eyebrow="Library"
       title="Policies"
-      description="Policy library from data/policies. View only."
+      description="Policy library Markdown. View only."
     >
       <div className="grid gap-3 sm:grid-cols-2">
         {policies.map((policy) => (
