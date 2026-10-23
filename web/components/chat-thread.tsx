@@ -8,13 +8,13 @@ import {
   CalendarDays,
   CheckCircle2,
   LoaderCircle,
-  Sparkles,
   Ticket,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/auth-provider";
+import { BrandMark } from "@/components/brand-mark";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { TraceInspector } from "@/components/trace-inspector";
 import { Badge } from "@/components/ui/badge";
@@ -388,9 +388,7 @@ export function ChatThread() {
       <header className="relative z-10 flex items-end justify-between gap-3 border-b border-stone-200/70 px-4 py-3 backdrop-blur-sm sm:gap-4 sm:px-6 sm:py-4">
         <div className="min-w-0">
           <div className="mb-1 hidden items-center gap-2 md:flex">
-            <span className="inline-flex size-7 items-center justify-center rounded-full bg-teal-800 text-white shadow-sm">
-              <Sparkles className="size-3.5" />
-            </span>
+            <BrandMark size="sm" />
             <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
               Assistant
             </p>

@@ -13,12 +13,12 @@ import {
   LogOut,
   Menu,
   MessageSquare,
-  Sparkles,
   Ticket,
   Users,
 } from "lucide-react";
 
 import { useAuth } from "@/components/auth-provider";
+import { BrandMark } from "@/components/brand-mark";
 import { ConversationList } from "@/components/conversation-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -167,9 +167,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {!collapsed ? (
             <div className="min-w-0 flex-1 px-1">
               <div className="mb-2 flex items-center gap-2">
-                <span className="inline-flex size-7 items-center justify-center rounded-full bg-teal-800 text-white">
-                  <Sparkles className="size-3.5" />
-                </span>
+                <BrandMark size="sm" />
                 <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
                   HR Assistant
                 </p>
@@ -179,9 +177,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </p>
             </div>
           ) : (
-            <span className="inline-flex size-8 items-center justify-center rounded-full bg-teal-800 text-white">
-              <Sparkles className="size-3.5" />
-            </span>
+            <BrandMark size="md" />
           )}
           <Button
             type="button"
@@ -241,9 +237,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <SheetHeader className="border-b border-stone-200/80 pr-12">
             <div className="flex items-center gap-2">
-              <span className="inline-flex size-8 items-center justify-center rounded-full bg-teal-800 text-white">
-                <Sparkles className="size-3.5" />
-              </span>
+              <BrandMark size="md" />
               <div className="min-w-0 text-left">
                 <SheetTitle className="text-sm font-semibold text-stone-900">
                   HR Assistant

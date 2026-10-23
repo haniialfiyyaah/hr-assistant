@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
-
 import { useAuth } from "@/components/auth-provider";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -53,9 +52,7 @@ export default function LoginPage() {
     <div className="chat-surface flex min-h-svh items-center justify-center px-4 py-8 sm:py-10">
       <div className="flex w-full max-w-md flex-col gap-4 sm:gap-5">
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="inline-flex size-11 items-center justify-center rounded-2xl bg-teal-800 text-white shadow-sm sm:size-12">
-            <Sparkles className="size-5" />
-          </span>
+          <BrandMark size="lg" className="rounded-2xl" />
           <div>
             <p className="text-xs font-medium tracking-[0.14em] text-teal-800/80 uppercase">
               HR Assistant
